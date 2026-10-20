@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ROLE_LABEL, SKILLS, SKILL_LEVELS } from '../config';
-import { inScope, locName, uid, useStore } from '../store';
+import { attestStatus, inScope, locName, todayISO, uid, useStore } from '../store';
 import type { StaffRole } from '../types';
 
 export default function Team() {
@@ -25,7 +25,15 @@ export default function Team() {
   };
 
   const remove = (id: string) => {
-    if (confirm('Удалить сотрудника?')) update((s) => ({ ...s, staff: s.staff.filter((p) => p.id !== id) }));
+    if (confirm('Удалить сотрудника?')) update((s) => ({ ...s, staff: s.staff.filter((p) => p.id !== id), attestations: s.attestations.filter((a) => a.staffId !== id) }));
+  };
+
+  const [att, setAtt] = useState({ staffId: '', passed: true, note: '' });
+  const addAttestation = () => {
+    const staffId = att.staffId || staff[0]?.id;
+    if (!staffId) return;
+    update((s) => ({ ...s, attestations: [{ id: uid(), staffId, date: todayISO(), passed: att.passed, note: att.note.trim() }, ...s.attestations] }));
+    setAtt({ ...att, note: '' });
   };
 
   const avg = (p: { skills: Record<string, number> }) => SKILLS.reduce((a, k) => a + (p.skills[k.id] ?? 0), 0) / SKILLS.length;
@@ -52,12 +60,13 @@ export default function Team() {
                 <th>Сотрудник</th>
                 {SKILLS.map((k) => <th key={k.id}>{k.title}</th>)}
                 <th className="num">Средний</th>
+                <th>Аттестация</th>
                 <th />
               </tr>
             </thead>
             <tbody>
               {staff.length === 0 && (
-                <tr><td colSpan={SKILLS.length + 3}><div className="empty">Пока никого нет. Добавьте первого сотрудника ниже.</div></td></tr>
+                <tr><td colSpan={SKILLS.length + 4}><div className="empty">Пока никого нет. Добавьте первого сотрудника ниже.</div></td></tr>
               )}
               {staff.map((p) => (
                 <tr key={p.id}>
@@ -76,6 +85,19 @@ export default function Team() {
                     );
                   })}
                   <td className="num">{avg(p).toFixed(1)}</td>
+                  <td>
+                    {(() => {
+                      const a = attestStatus(state, p.id);
+                      if (a.state === 'none') return <span className="pill">не проходил</span>;
+                      const label = a.state === 'ok' ? 'действует' : a.state === 'due' ? 'просрочена' : 'не пройдена';
+                      return (
+                        <>
+                          <span className={`pill ${a.state === 'ok' ? 'ok' : a.state === 'due' ? 'warn' : 'bad'}`}>{label}</span>
+                          <div className="small muted">{a.last?.date}</div>
+                        </>
+                      );
+                    })()}
+                  </td>
                   <td><button className="btn danger sm" onClick={() => remove(p.id)}>Удалить</button></td>
                 </tr>
               ))}
@@ -100,6 +122,26 @@ export default function Team() {
             </select>
           </div>
           <button className="btn" onClick={add}>Добавить</button>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>Записать аттестацию</h2>
+        <p className="muted small" style={{ marginBottom: 10 }}>Аттестация действует {state.settings.attestDays} дн., потом считается просроченной. Срок меняется в «Настройках».</p>
+        <div className="form">
+          <div className="f">Сотрудник
+            <select value={att.staffId || staff[0]?.id || ''} onChange={(e) => setAtt({ ...att, staffId: e.target.value })}>
+              {staff.map((p) => <option key={p.id} value={p.id}>{p.name} · {locName(state, p.locationId)}</option>)}
+            </select>
+          </div>
+          <div className="f">Результат
+            <select value={att.passed ? 'yes' : 'no'} onChange={(e) => setAtt({ ...att, passed: e.target.value === 'yes' })}>
+              <option value="yes">Пройдена</option>
+              <option value="no">Не пройдена</option>
+            </select>
+          </div>
+          <div className="f" style={{ flex: 1, minWidth: 180 }}>Заметка<input value={att.note} onChange={(e) => setAtt({ ...att, note: e.target.value })} placeholder="Что подтвердил, что подтянуть" /></div>
+          <button className="btn" onClick={addAttestation} disabled={staff.length === 0}>Записать</button>
         </div>
       </div>
     </div>

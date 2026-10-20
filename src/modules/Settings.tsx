@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
 import { MODULES } from '../config';
-import { uid, useStore } from '../store';
-import type { AppState } from '../types';
+import { migrate, uid, useStore } from '../store';
 
 export default function SettingsPage() {
   const { state, update, replace, resetDemo } = useStore();
@@ -21,15 +20,24 @@ export default function SettingsPage() {
   const removeLoc = (id: string) => {
     if (state.locations.length <= 1) return setMsg('Должна остаться хотя бы одна точка.');
     if (!confirm('Удалить точку вместе с её сотрудниками, журналами и показателями?')) return;
-    update((s) => ({
-      ...s,
-      locations: s.locations.filter((l) => l.id !== id),
-      staff: s.staff.filter((p) => p.locationId !== id),
-      dialIns: s.dialIns.filter((x) => x.locationId !== id),
-      cuppings: s.cuppings.filter((x) => x.locationId !== id),
-      metrics: s.metrics.filter((x) => x.locationId !== id),
-      settings: { ...s.settings, activeLocation: s.settings.activeLocation === id ? 'all' : s.settings.activeLocation },
-    }));
+    update((s) => {
+      const gone = new Set(s.staff.filter((p) => p.locationId === id).map((p) => p.id));
+      return {
+        ...s,
+        locations: s.locations.filter((l) => l.id !== id),
+        staff: s.staff.filter((p) => p.locationId !== id),
+        attestations: s.attestations.filter((a) => !gone.has(a.staffId)),
+        dialIns: s.dialIns.filter((x) => x.locationId !== id),
+        cuppings: s.cuppings.filter((x) => x.locationId !== id),
+        writeOffs: s.writeOffs.filter((x) => x.locationId !== id),
+        metrics: s.metrics.filter((x) => x.locationId !== id),
+        equipment: s.equipment.filter((x) => x.locationId !== id),
+        repairs: s.repairs.filter((x) => x.locationId !== id),
+        visits: s.visits.filter((x) => x.locationId !== id),
+        complaints: s.complaints.filter((x) => x.locationId !== id),
+        settings: { ...s.settings, activeLocation: s.settings.activeLocation === id ? 'all' : s.settings.activeLocation },
+      };
+    });
   };
 
   const exportData = () => {
@@ -43,8 +51,8 @@ export default function SettingsPage() {
 
   const importData = async (f: File) => {
     try {
-      const data = JSON.parse(await f.text()) as AppState;
-      if (data.version !== 1 || !Array.isArray(data.locations) || !data.settings) throw new Error('bad');
+      const data = migrate(JSON.parse(await f.text()));
+      if (!data) throw new Error('bad');
       replace(data);
       setMsg('Данные загружены.');
     } catch {
@@ -54,7 +62,23 @@ export default function SettingsPage() {
 
   const clearAll = () => {
     if (!confirm('Стереть все демо-данные и начать с чистого листа? Точки останутся.')) return;
-    update((s) => ({ ...s, staff: [], dialIns: [], cuppings: [], inventory: [], metrics: [], playbook: [] }));
+    update((s) => ({
+      ...s,
+      staff: [],
+      attestations: [],
+      dialIns: [],
+      cuppings: [],
+      recipes: [],
+      inventory: [],
+      writeOffs: [],
+      metrics: [],
+      equipment: [],
+      repairs: [],
+      visits: [],
+      complaints: [],
+      reportNote: '',
+      playbook: [],
+    }));
   };
 
   const num = (v: string, d: number) => (Number.isFinite(parseFloat(v)) ? parseFloat(v) : d);
@@ -103,6 +127,16 @@ export default function SettingsPage() {
           <div className="f">Допуск по выходу, г<input type="number" step="0.5" min={0} value={settings.espresso.yieldTol} onChange={(e) => setS({ espresso: { ...settings.espresso, yieldTol: num(e.target.value, 2) } })} /></div>
           <div className="f">Время от, с<input type="number" min={0} value={settings.espresso.timeMin} onChange={(e) => setS({ espresso: { ...settings.espresso, timeMin: num(e.target.value, 25) } })} /></div>
           <div className="f">Время до, с<input type="number" min={0} value={settings.espresso.timeMax} onChange={(e) => setS({ espresso: { ...settings.espresso, timeMax: num(e.target.value, 30) } })} /></div>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>Нормы сети</h2>
+        <p className="muted small" style={{ marginBottom: 10 }}>По ним «Обзор» и «Отчёт» решают, что считать отклонением. Подберите под вашу сеть.</p>
+        <div className="form">
+          <div className="f">Целевая себестоимость, %<input type="number" step="0.5" min={0} max={100} value={settings.cogsTargetPct} onChange={(e) => setS({ cogsTargetPct: num(e.target.value, 28) })} /></div>
+          <div className="f">Аттестация действует, дн.<input type="number" min={1} value={settings.attestDays} onChange={(e) => setS({ attestDays: Math.max(1, num(e.target.value, 180)) })} /></div>
+          <div className="f">Минимальный балл обхода, %<input type="number" min={0} max={100} value={settings.visitMinScore} onChange={(e) => setS({ visitMinScore: num(e.target.value, 80) })} /></div>
         </div>
       </div>
 

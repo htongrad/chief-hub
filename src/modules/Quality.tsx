@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { dialIssues, inScope, locName, uid, useStore } from '../store';
+import { dialIssues, inScope, locName, todayISO, uid, useStore } from '../store';
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = todayISO;
 
 export default function Quality() {
   const { state, update } = useStore();
@@ -14,6 +14,14 @@ export default function Quality() {
   const defLoc = scope !== 'all' ? scope : state.locations[0]?.id ?? '';
   const [d, setD] = useState({ locationId: defLoc, doseG: 18, yieldG: 36, timeS: 27, note: '' });
   const [c, setC] = useState({ locationId: defLoc, coffee: '', score: 84, note: '' });
+
+  const [rc, setRc] = useState<{ id: string | null; name: string; spec: string }>({ id: null, name: '', spec: '' });
+  const saveRecipe = () => {
+    if (!rc.name.trim() || !rc.spec.trim()) return;
+    const row = { name: rc.name.trim(), spec: rc.spec.trim(), updated: today() };
+    update((s) => ({ ...s, recipes: rc.id ? s.recipes.map((x) => (x.id === rc.id ? { ...x, ...row } : x)) : [...s.recipes, { id: uid(), ...row }] }));
+    setRc({ id: null, name: '', spec: '' });
+  };
 
   const liveIssues = dialIssues(d, espresso);
   const targetYield = d.doseG * espresso.ratio;
@@ -137,6 +145,32 @@ export default function Quality() {
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>Стандарты напитков (ТТК)</h2>
+        <p className="muted small" style={{ marginBottom: 10 }}>Единая рецептура для всех точек. Измените стандарт здесь, и команда видит актуальную версию с датой обновления.</p>
+        <div className="stack" style={{ gap: 8 }}>
+          {state.recipes.length === 0 && <div className="empty">Стандартов пока нет. Добавьте первый ниже.</div>}
+          {state.recipes.map((r) => (
+            <div className="alert" key={r.id}>
+              <div style={{ flex: 1 }}>
+                <b>{r.name}</b> <span className="small muted">· обновлено {r.updated}</span>
+                <div className="small">{r.spec}</div>
+              </div>
+              <div className="row" style={{ alignSelf: 'start' }}>
+                <button className="btn ghost sm" onClick={() => setRc({ id: r.id, name: r.name, spec: r.spec })}>Изменить</button>
+                <button className="btn danger sm" onClick={() => confirm('Удалить стандарт?') && update((s) => ({ ...s, recipes: s.recipes.filter((x) => x.id !== r.id) }))}>×</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="form" style={{ marginTop: 12 }}>
+          <div className="f">Напиток<input value={rc.name} onChange={(e) => setRc({ ...rc, name: e.target.value })} placeholder="Например, Латте" /></div>
+          <div className="f" style={{ flex: 1, minWidth: 220 }}>Рецептура<input value={rc.spec} onChange={(e) => setRc({ ...rc, spec: e.target.value })} placeholder="Доза, объём, время, температура, подача" /></div>
+          <button className="btn" onClick={saveRecipe}>{rc.id ? 'Сохранить' : 'Добавить'}</button>
+          {rc.id && <button className="btn ghost" onClick={() => setRc({ id: null, name: '', spec: '' })}>Отмена</button>}
         </div>
       </div>
     </div>

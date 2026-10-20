@@ -1,4 +1,18 @@
-import type { AppState, DialIn, InventoryItem, MetricEntry, Staff } from './types';
+import type { AppState, Attestation, Complaint, DialIn, Equipment, InventoryItem, MetricEntry, ModuleId, Recipe, Repair, Staff, Visit, WriteOff } from './types';
+
+/** Все разделы включены. Используется для демо и при переносе данных старой версии. */
+export const defaultModules = (): Record<ModuleId, boolean> => ({
+  overview: true,
+  quality: true,
+  team: true,
+  inventory: true,
+  metrics: true,
+  equipment: true,
+  rounds: true,
+  report: true,
+  playbook: true,
+  settings: true,
+});
 
 /** Демо-данные: вымышленная сеть из трёх точек. Заменяются своими в «Настройки → Данные». */
 export function makeSeed(): AppState {
@@ -29,7 +43,8 @@ export function makeSeed(): AppState {
   const iso = (daysAgo: number) => {
     const d = new Date(today);
     d.setDate(d.getDate() - daysAgo);
-    return d.toISOString().slice(0, 10);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   };
 
   const dialIns: DialIn[] = [
@@ -46,6 +61,19 @@ export function makeSeed(): AppState {
     { id: 'c3', locationId: 'l3', date: iso(12), coffee: 'Бразилия, пульпед', score: 83.25, note: 'Орех, шоколад, баланс' },
   ];
 
+  const recipes: Recipe[] = [
+    { id: 'rc1', name: 'Эспрессо', spec: 'Доза 18 г, выход 36 г, время 25–30 с. Подача сразу, в прогретую чашку.', updated: iso(14) },
+    { id: 'rc2', name: 'Капучино 180 мл', spec: 'Двойной эспрессо и молоко до 180 мл, пена около 1 см. Температура молока 60–65 °C.', updated: iso(14) },
+    { id: 'rc3', name: 'Фильтр V60', spec: '15 г кофе на 250 мл воды, общее время 2:45–3:15.', updated: iso(14) },
+  ];
+
+  const attestations: Attestation[] = [
+    { id: 'at1', staffId: 's1', date: iso(30), passed: true, note: 'Все навыки подтверждены' },
+    { id: 'at2', staffId: 's2', date: iso(200), passed: true, note: '' },
+    { id: 'at3', staffId: 's4', date: iso(10), passed: false, note: 'Переаттестация по молоку через две недели' },
+    { id: 'at4', staffId: 's7', date: iso(60), passed: true, note: '' },
+  ];
+
   const item = (id: string, name: string, category: string, unit: string, par: number, a: number, b: number, c: number): InventoryItem => ({
     id, name, category, unit, par, qty: { l1: a, l2: b, l3: c },
   });
@@ -59,6 +87,12 @@ export function makeSeed(): AppState {
     item('i6', 'Крышки', 'Расходники', 'шт', 300, 380, 140, 400),
     item('i7', 'Средство для чистки гидравлики', 'Химия', 'уп', 2, 3, 1, 2),
     item('i8', 'Фильтры V60', 'Расходники', 'уп', 2, 3, 2, 1),
+  ];
+
+  const writeOffs: WriteOff[] = [
+    { id: 'w1', locationId: 'l1', itemId: 'i3', qty: 2, reason: 'Срок годности', date: iso(1) },
+    { id: 'w2', locationId: 'l2', itemId: 'i1', qty: 0.5, reason: 'Брак напитка', date: iso(3) },
+    { id: 'w3', locationId: 'l3', itemId: 'i5', qty: 20, reason: 'Пролив или ошибка', date: iso(2) },
   ];
 
   // Недельные показатели: пять последних недель по каждой точке, детерминированно.
@@ -80,21 +114,59 @@ export function makeSeed(): AppState {
     });
   });
 
+  const eq = (id: string, locationId: string, name: string, kind: Equipment['kind'], intervalDays: number, lastServiceDate: string | null): Equipment => ({
+    id, locationId, name, kind, intervalDays, lastServiceDate,
+  });
+  const equipment: Equipment[] = [
+    eq('e1', 'l1', 'Кофемашина', 'machine', 90, iso(85)),
+    eq('e2', 'l1', 'Кофемолка', 'grinder', 90, iso(30)),
+    eq('e3', 'l1', 'Фильтр воды', 'water', 180, iso(60)),
+    eq('e4', 'l2', 'Кофемашина', 'machine', 90, iso(40)),
+    eq('e5', 'l2', 'Кофемолка', 'grinder', 90, iso(100)),
+    eq('e6', 'l2', 'Фильтр воды', 'water', 180, iso(90)),
+    eq('e7', 'l3', 'Кофемашина', 'machine', 90, iso(20)),
+    eq('e8', 'l3', 'Кофемолка', 'grinder', 90, iso(25)),
+    eq('e9', 'l3', 'Фильтр воды', 'water', 180, null),
+  ];
+
+  const repairs: Repair[] = [{ id: 'rp1', locationId: 'l3', equipmentId: 'e7', date: iso(2), text: 'Течёт паровой кран', done: false }];
+
+  const visits: Visit[] = [
+    { id: 'v1', locationId: 'l1', date: iso(2), kind: 'round', score: 92, note: '' },
+    { id: 'v2', locationId: 'l2', date: iso(3), kind: 'round', score: 75, note: 'Грязный зал в пик, долгая подача' },
+    { id: 'v3', locationId: 'l3', date: iso(4), kind: 'round', score: 85, note: '' },
+    { id: 'v4', locationId: 'l3', date: iso(9), kind: 'mystery', score: 88, note: 'Хороший сервис, напиток тёплый' },
+    { id: 'v5', locationId: 'l2', date: iso(10), kind: 'round', score: 70, note: '' },
+  ];
+
+  const complaints: Complaint[] = [{ id: 'cm1', locationId: 'l2', date: iso(1), text: 'Долгое ожидание в утренний пик', resolved: false }];
+
   return {
-    version: 1,
+    version: 2,
     settings: {
       networkName: 'Моя сеть',
       currency: '₽',
       activeLocation: 'all',
-      modules: { overview: true, playbook: true, team: true, quality: true, inventory: true, metrics: true, settings: true },
+      modules: defaultModules(),
       espresso: { ratio: 2, yieldTol: 2, timeMin: 25, timeMax: 30 },
+      cogsTargetPct: 28,
+      attestDays: 180,
+      visitMinScore: 80,
     },
     locations,
     staff,
     dialIns,
     cuppings,
+    recipes,
+    attestations,
     inventory,
+    writeOffs,
     metrics,
+    equipment,
+    repairs,
+    visits,
+    complaints,
+    reportNote: '',
     playbook: ['d0-1', 'd0-2', 'd0-3'],
   };
 }
