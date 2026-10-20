@@ -312,7 +312,7 @@ export function buildReport(state: AppState, scope: string): ReportData {
     taste.push(`${l.name}: настройка в норме в ${Math.round((ok / rows.length) * 100)}% записей (всего ${rows.length})`);
   });
   const cups = state.cuppings.filter((c) => inScope(c.locationId, scope) && within(c.date, 7));
-  taste.push(cups.length ? `Каппингов за неделю: ${cups.length}, средний балл ${(cups.reduce((a, c) => a + c.score, 0) / cups.length).toFixed(1)}` : 'Каппингов за неделю не было');
+  taste.push(cups.length ? `Оценок кофе под фильтр за неделю: ${cups.length}, средний балл ${(cups.reduce((a, c) => a + c.score, 0) / cups.length).toFixed(1)}` : 'Оценок кофе под фильтр за неделю не было');
   sections.push({ title: 'Вкус и меню', lines: taste });
 
   // Люди
