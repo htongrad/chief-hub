@@ -1,0 +1,14 @@
+{
+  "name": "Chief Hub — панель шеф-бариста",
+  "short_name": "Chief Hub",
+  "description": "Рабочий инструмент шеф-бариста сети спешелти-кофеен",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f1ea",
+  "theme_color": "#3b2a20",
+  "lang": "ru",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
