@@ -20,6 +20,7 @@
 - `src/modules/` — разделы в порядке меню: Overview, Quality, Team, Inventory, Metrics, Equipment, Rounds, Report, Playbook, Settings. Порядок повторяет `docs/JOB_DESCRIPTION.md`: это основа панели.
 - `src/config.ts` — реестр разделов, навыки команды, должности, чек-лист обхода, план «Путь шефа».
 - `src/store.tsx` — хранилище (localStorage, адаптер для будущего облака), миграция данных `migrate()` и расчёты (нормы эспрессо, ТО, аттестации, сигналы, недельный отчёт).
+- `src/backup.ts` — копия на Google Диск: листы таблицы (`buildSheets`), автосохранение и код скрипта Apps Script. Новый раздел или поле данных — добавить и сюда, в `buildSheets`; сам скрипт при этом менять не нужно.
 - `src/types.ts` — описание данных. `src/seed.ts` — демо-данные.
 - `src/styles.css` — цвета и размеры (есть тёмная тема).
 - `docs/PRODUCT.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `README.md` — документация, обновлять при изменении продукта.

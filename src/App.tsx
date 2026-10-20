@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { MODULES } from './config';
 import { useStore } from './store';
+import { useAutoBackup } from './backup';
 import type { ModuleId } from './types';
 import Overview from './modules/Overview';
 import Playbook from './modules/Playbook';
@@ -29,6 +30,7 @@ const VIEWS: Record<ModuleId, () => JSX.Element> = {
 export default function App() {
   const { state, update } = useStore();
   const [active, setActive] = useState<ModuleId>('overview');
+  useAutoBackup(state);
 
   const enabled = MODULES.filter((m) => m.locked || state.settings.modules[m.id]);
   const current = enabled.find((m) => m.id === active) ?? enabled[0];
