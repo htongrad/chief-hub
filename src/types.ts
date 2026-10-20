@@ -43,14 +43,24 @@ export interface Cupping {
   date: string;
   coffee: string;
   score: number; // 0..100 по шкале SCA
-  note: string;
+  note: string; // дескрипторы вкуса
+  comment: string; // заметка к оценке
 }
 
-/** Стандарт напитка (ТТК): название и описание рецептуры. */
+/** Ингредиент стандарта: название, количество и единица (г, мл, шт. и т.п.). */
+export interface RecipeIngredient {
+  name: string;
+  amount: string;
+  unit: string;
+}
+
+/** Стандарт напитка (ТТК): состав, приготовление и описание для гостя. */
 export interface Recipe {
   id: string;
   name: string;
-  spec: string;
+  ingredients: RecipeIngredient[];
+  method: string; // способ приготовления
+  guestDescription: string; // продающее описание для гостя
   updated: string; // YYYY-MM-DD
 }
 

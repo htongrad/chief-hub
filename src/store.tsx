@@ -22,10 +22,10 @@ const KEY = 'chief-hub:v1';
 export function migrate(raw: unknown): AppState | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Partial<Omit<AppState, 'version' | 'settings'>> & { version?: number; settings?: Partial<Settings> };
-  if ((r.version !== 1 && r.version !== 2) || !Array.isArray(r.locations) || !r.settings) return null;
+  if (![1, 2, 3].includes(r.version ?? 0) || !Array.isArray(r.locations) || !r.settings) return null;
   const s = r.settings;
   return {
-    version: 2,
+    version: 3,
     settings: {
       networkName: s.networkName ?? 'Моя сеть',
       currency: s.currency ?? '₽',
@@ -39,8 +39,19 @@ export function migrate(raw: unknown): AppState | null {
     locations: r.locations,
     staff: r.staff ?? [],
     dialIns: r.dialIns ?? [],
-    cuppings: r.cuppings ?? [],
-    recipes: r.recipes ?? [],
+    cuppings: (r.cuppings ?? []).map((c) => ({ ...c, comment: c.comment ?? '' })),
+    // Версия 2 хранила рецептуру одной строкой (spec): переносим её в способ приготовления.
+    recipes: (r.recipes ?? []).map((x) => {
+      const old = x as Recipe & { spec?: string };
+      return {
+        id: x.id,
+        name: x.name,
+        ingredients: x.ingredients ?? [],
+        method: x.method ?? old.spec ?? '',
+        guestDescription: x.guestDescription ?? '',
+        updated: x.updated,
+      };
+    }),
     attestations: r.attestations ?? [],
     inventory: r.inventory ?? [],
     writeOffs: r.writeOffs ?? [],
