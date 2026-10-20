@@ -8,15 +8,21 @@ import Team from './modules/Team';
 import Quality from './modules/Quality';
 import Inventory from './modules/Inventory';
 import Metrics from './modules/Metrics';
+import Equipment from './modules/Equipment';
+import Rounds from './modules/Rounds';
+import Report from './modules/Report';
 import SettingsPage from './modules/Settings';
 
 const VIEWS: Record<ModuleId, () => JSX.Element> = {
   overview: Overview,
-  playbook: Playbook,
-  team: Team,
   quality: Quality,
+  team: Team,
   inventory: Inventory,
   metrics: Metrics,
+  equipment: Equipment,
+  rounds: Rounds,
+  report: Report,
+  playbook: Playbook,
   settings: SettingsPage,
 };
 

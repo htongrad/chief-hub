@@ -1,5 +1,5 @@
 import { PLAYBOOK } from '../config';
-import { dialIssues, fmt, inScope, lastWeek, locName, useStore } from '../store';
+import { attestSummary, buildSignals, fmt, inScope, lastWeek, overdueEquipmentCount, prevWeekOf, serviceScore, stability, useStore, weekSummary } from '../store';
 
 export default function Overview() {
   const { state } = useStore();
@@ -8,44 +8,51 @@ export default function Overview() {
   const cur = settings.currency;
 
   const week = lastWeek(state);
-  const weeks = [...new Set(state.metrics.map((m) => m.week))].sort();
-  const prevWeek = week ? weeks[weeks.indexOf(week) - 1] : undefined;
-  const sumFor = (w?: string) => {
-    const rows = state.metrics.filter((m) => m.week === w && inScope(m.locationId, scope));
-    return {
-      revenue: rows.reduce((a, r) => a + r.revenue, 0),
-      checks: rows.reduce((a, r) => a + r.checks, 0),
-      cogs: rows.length ? rows.reduce((a, r) => a + r.cogsPct, 0) / rows.length : 0,
-    };
-  };
-  const now = sumFor(week ?? undefined);
-  const prev = prevWeek ? sumFor(prevWeek) : null;
-  const avgCheck = now.checks ? now.revenue / now.checks : 0;
+  const prevWeek = week ? prevWeekOf(state, week) : undefined;
+  const now = weekSummary(state, week ?? undefined, scope);
+  const prev = prevWeek ? weekSummary(state, prevWeek, scope) : null;
   const delta = prev && prev.revenue ? ((now.revenue - prev.revenue) / prev.revenue) * 100 : null;
 
-  const lowStock: { item: string; loc: string; qty: number; par: number; unit: string }[] = [];
-  state.inventory.forEach((it) =>
-    state.locations.filter((l) => inScope(l.id, scope)).forEach((l) => {
-      const q = it.qty[l.id] ?? 0;
-      if (q < it.par) lowStock.push({ item: it.name, loc: l.name, qty: q, par: it.par, unit: it.unit });
-    })
-  );
+  const taste = stability(state, scope, 30);
+  const service = serviceScore(state, scope, 30);
+  const att = attestSummary(state, scope);
+  const overdue = overdueEquipmentCount(state, scope);
+  const equipmentCount = state.equipment.filter((e) => inScope(e.locationId, scope)).length;
 
-  const badDial = state.dialIns
-    .filter((d) => inScope(d.locationId, scope))
-    .map((d) => ({ d, issues: dialIssues(d, settings.espresso) }))
-    .filter((x) => x.issues.length)
-    .sort((a, b) => b.d.date.localeCompare(a.d.date));
+  const signals = buildSignals(state, scope);
+  const shown = signals.slice(0, 8);
 
-  const staff = state.staff.filter((s) => inScope(s.locationId, scope));
   const totalItems = PLAYBOOK.reduce((a, s) => a + s.items.length, 0);
   const done = state.playbook.length;
-
-  const trainees = staff.filter((s) => s.role === 'trainee').length;
 
   return (
     <div className="stack">
       <div className="grid kpis">
+        <div className="card kpi">
+          <div className="label">Стабильность вкуса</div>
+          <div className="value">{taste.pct === null ? '—' : `${taste.pct}%`}</div>
+          <div className="delta">настройка в норме, записей за 30 дней: {taste.total}</div>
+        </div>
+        <div className="card kpi">
+          <div className="label">Качество сервиса</div>
+          <div className="value">{service === null ? '—' : `${service}%`}</div>
+          <div className="delta">средний балл обходов за 30 дней</div>
+        </div>
+        <div className="card kpi">
+          <div className="label">Себестоимость</div>
+          <div className="value">{week ? `${now.cogs.toFixed(1)}%` : '—'}</div>
+          <div className="delta">цель {settings.cogsTargetPct}%, среднее по выбранным точкам</div>
+        </div>
+        <div className="card kpi">
+          <div className="label">Команда</div>
+          <div className="value">{att.total}</div>
+          <div className="delta">{att.pct === null ? 'нет сотрудников' : `аттестовано ${att.pct}%`}</div>
+        </div>
+        <div className="card kpi">
+          <div className="label">Оборудование</div>
+          <div className="value">{equipmentCount ? (overdue ? `${overdue} просрочено` : 'в порядке') : '—'}</div>
+          <div className="delta">{equipmentCount ? `ТО по графику, единиц: ${equipmentCount}` : 'оборудование не внесено'}</div>
+        </div>
         <div className="card kpi">
           <div className="label">Выручка за неделю{week ? ` (${week})` : ''}</div>
           <div className="value">{week ? `${fmt(now.revenue)} ${cur}` : '—'}</div>
@@ -53,18 +60,8 @@ export default function Overview() {
         </div>
         <div className="card kpi">
           <div className="label">Средний чек</div>
-          <div className="value">{week ? `${fmt(avgCheck)} ${cur}` : '—'}</div>
+          <div className="value">{week ? `${fmt(now.avgCheck)} ${cur}` : '—'}</div>
           <div className="delta">{fmt(now.checks)} чеков за неделю</div>
-        </div>
-        <div className="card kpi">
-          <div className="label">Себестоимость</div>
-          <div className="value">{week ? `${now.cogs.toFixed(1)}%` : '—'}</div>
-          <div className="delta">средняя по выбранным точкам</div>
-        </div>
-        <div className="card kpi">
-          <div className="label">Команда</div>
-          <div className="value">{staff.length}</div>
-          <div className="delta">из них стажёров: {trainees}</div>
         </div>
       </div>
 
@@ -72,24 +69,16 @@ export default function Overview() {
         <div className="card">
           <h2>Требует внимания</h2>
           <div className="stack" style={{ gap: 8 }}>
-            {lowStock.length === 0 && badDial.length === 0 && <div className="alert ok">Всё в норме: остатки выше минимума, настройки в допуске.</div>}
-            {badDial.slice(0, 3).map(({ d, issues }) => (
-              <div className="alert bad" key={d.id}>
+            {signals.length === 0 && <div className="alert ok">Всё в норме: настройки в допуске, остатки выше минимума, ТО по графику.</div>}
+            {shown.map((x, i) => (
+              <div className={`alert ${x.level}`} key={i}>
                 <div>
-                  <b>{locName(state, d.locationId)}</b>, {d.date}: эспрессо вне нормы
-                  <div className="small muted">{issues.join(', ')} · {d.doseG} → {d.yieldG} г за {d.timeS} с</div>
+                  <b>{x.title}</b>
+                  <div className="small muted">{x.detail}</div>
                 </div>
               </div>
             ))}
-            {lowStock.slice(0, 5).map((x, i) => (
-              <div className="alert warn" key={i}>
-                <div>
-                  <b>{x.item}</b> · {x.loc}
-                  <div className="small muted">осталось {x.qty} {x.unit}, минимум {x.par} {x.unit}</div>
-                </div>
-              </div>
-            ))}
-            {lowStock.length > 5 && <p className="small muted">…и ещё {lowStock.length - 5} позиций в разделе «Склад»</p>}
+            {signals.length > shown.length && <p className="small muted">…и ещё {signals.length - shown.length}. Полный список в разделе «Отчёт», блок «Риски».</p>}
           </div>
         </div>
 
