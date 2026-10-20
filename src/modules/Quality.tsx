@@ -85,7 +85,7 @@ export default function Quality() {
         </div>
 
         <div className="card">
-          <h2>Новый каппинг</h2>
+          <h2>Новая оценка кофе под фильтр</h2>
           <div className="form">
             <div className="f">Точка
               <select value={c.locationId} onChange={(e) => setC({ ...c, locationId: e.target.value })}>
@@ -128,12 +128,12 @@ export default function Quality() {
         </div>
 
         <div className="card flat">
-          <div style={{ padding: '14px 16px 0' }}><h2>Каппинги</h2></div>
+          <div style={{ padding: '14px 16px 0' }}><h2>Оценки кофе под фильтр</h2></div>
           <div className="tablewrap">
             <table>
               <thead><tr><th>Дата</th><th>Кофе</th><th>Точка</th><th className="num">Балл</th></tr></thead>
               <tbody>
-                {cups.length === 0 && <tr><td colSpan={4}><div className="empty">Каппингов пока нет.</div></td></tr>}
+                {cups.length === 0 && <tr><td colSpan={4}><div className="empty">Оценок пока нет.</div></td></tr>}
                 {cups.slice(0, 12).map((x) => (
                   <tr key={x.id}>
                     <td>{x.date}</td>
