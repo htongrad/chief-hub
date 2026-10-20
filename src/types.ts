@@ -166,7 +166,7 @@ export interface Settings {
 }
 
 export interface AppState {
-  version: 2;
+  version: 3;
   settings: Settings;
   locations: Location[];
   staff: Staff[];

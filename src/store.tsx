@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { AppState, Attestation, DialIn, EspressoTarget, Equipment, Settings } from './types';
+import type { AppState, Attestation, DialIn, EspressoTarget, Equipment, Recipe, Settings } from './types';
 import { defaultModules, makeSeed } from './seed';
 
 /**
