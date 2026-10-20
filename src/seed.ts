@@ -56,15 +56,45 @@ export function makeSeed(): AppState {
   ];
 
   const cuppings = [
-    { id: 'c1', locationId: 'l1', date: iso(5), coffee: 'Эфиопия, мытая', score: 86.5, note: 'Жасмин, бергамот, чайное тело' },
-    { id: 'c2', locationId: 'l2', date: iso(5), coffee: 'Колумбия, натурал', score: 84, note: 'Красные ягоды, лёгкая ферментация' },
-    { id: 'c3', locationId: 'l3', date: iso(12), coffee: 'Бразилия, пульпед', score: 83.25, note: 'Орех, шоколад, баланс' },
+    { id: 'c1', locationId: 'l1', date: iso(5), coffee: 'Эфиопия, мытая', score: 86.5, note: 'Жасмин, бергамот, чайное тело', comment: '' },
+    { id: 'c2', locationId: 'l2', date: iso(5), coffee: 'Колумбия, натурал', score: 84, note: 'Красные ягоды, лёгкая ферментация', comment: '' },
+    { id: 'c3', locationId: 'l3', date: iso(12), coffee: 'Бразилия, пульпед', score: 83.25, note: 'Орех, шоколад, баланс', comment: '' },
   ];
 
   const recipes: Recipe[] = [
-    { id: 'rc1', name: 'Эспрессо', spec: 'Доза 18 г, выход 36 г, время 25–30 с. Подача сразу, в прогретую чашку.', updated: iso(14) },
-    { id: 'rc2', name: 'Капучино 180 мл', spec: 'Двойной эспрессо и молоко до 180 мл, пена около 1 см. Температура молока 60–65 °C.', updated: iso(14) },
-    { id: 'rc3', name: 'Фильтр V60', spec: '15 г кофе на 250 мл воды, общее время 2:45–3:15.', updated: iso(14) },
+    {
+      id: 'rc1',
+      name: 'Эспрессо',
+      ingredients: [
+        { name: 'Кофе в зёрнах', amount: '18', unit: 'г' },
+        { name: 'Вода (готовый напиток)', amount: '36', unit: 'г' },
+      ],
+      method: 'Доза 18 г, выход 36 г, время 25–30 с. Подача сразу, в прогретую чашку.',
+      guestDescription: 'Насыщенный и плотный глоток: сладость карамели и мягкая горчинка в финише.',
+      updated: iso(14),
+    },
+    {
+      id: 'rc2',
+      name: 'Капучино 180 мл',
+      ingredients: [
+        { name: 'Эспрессо (двойной)', amount: '2', unit: 'шот' },
+        { name: 'Молоко', amount: '150', unit: 'мл' },
+      ],
+      method: 'Двойной эспрессо и молоко до 180 мл, пена около 1 см. Температура молока 60–65 °C.',
+      guestDescription: 'Нежная бархатистая пена и тёплое молоко вокруг крепкого эспрессо.',
+      updated: iso(14),
+    },
+    {
+      id: 'rc3',
+      name: 'Фильтр V60',
+      ingredients: [
+        { name: 'Кофе молотый', amount: '15', unit: 'г' },
+        { name: 'Вода', amount: '250', unit: 'мл' },
+      ],
+      method: '15 г кофе на 250 мл воды, общее время 2:45–3:15.',
+      guestDescription: 'Чистый и ясный вкус, в котором видно характер зерна.',
+      updated: iso(14),
+    },
   ];
 
   const attestations: Attestation[] = [
@@ -142,7 +172,7 @@ export function makeSeed(): AppState {
   const complaints: Complaint[] = [{ id: 'cm1', locationId: 'l2', date: iso(1), text: 'Долгое ожидание в утренний пик', resolved: false }];
 
   return {
-    version: 2,
+    version: 3,
     settings: {
       networkName: 'Моя сеть',
       currency: '₽',
