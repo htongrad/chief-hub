@@ -141,13 +141,13 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
     const list = [...state.staff].sort((a, b) => ln(a.locationId).localeCompare(ln(b.locationId)) || a.name.localeCompare(b.name));
     sheets.push({
       name: 'Команда',
-      header: ['Сотрудник', 'Точка', 'Должность', 'Аттестация', 'Последняя', ...SKILLS.map((s) => s.title)],
+      header: ['Сотрудник', 'Точка', 'Должность', 'Аттестация', 'Последняя', 'Заметка', ...SKILLS.map((s) => s.title)],
       rows: list.map((p) => {
         const a = attestStatus(state, p.id);
-        return row(p.name, ln(p.locationId), ROLE_LABEL[p.role], ATTEST_LABEL[a.state], a.last?.date ?? '—', ...SKILLS.map((s) => SKILL_LEVELS[p.skills[s.id] ?? 0]));
+        return row(p.name, ln(p.locationId), ROLE_LABEL[p.role], ATTEST_LABEL[a.state], a.last?.date ?? '—', a.last?.note || '—', ...SKILLS.map((s) => SKILL_LEVELS[p.skills[s.id] ?? 0]));
       }),
-      marks: list.map((p) => mk('', '', '', ATTEST_MARK[attestStatus(state, p.id).state], '', ...SKILLS.map(() => '' as Mark))),
-      widths: [180, 140, 130, 120, 100],
+      marks: list.map((p) => mk('', '', '', ATTEST_MARK[attestStatus(state, p.id).state], '', '', ...SKILLS.map(() => '' as Mark))),
+      widths: [180, 140, 130, 120, 100, 260],
     });
   }
 

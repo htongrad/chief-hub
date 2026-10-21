@@ -94,6 +94,7 @@ export default function Team() {
                         <>
                           <span className={`pill ${a.state === 'ok' ? 'ok' : a.state === 'due' ? 'warn' : 'bad'}`}>{label}</span>
                           <div className="small muted">{a.last?.date}</div>
+                          {a.last?.note && <div className="small muted" style={{ maxWidth: 220 }}>{a.last.note}</div>}
                         </>
                       );
                     })()}
@@ -105,7 +106,16 @@ export default function Team() {
           </table>
         </div>
       </div>
-      <p className="small muted">Нажмите на точки, чтобы изменить уровень навыка: — → учится → уверенно → может учить.</p>
+      <details className="small muted">
+        <summary style={{ cursor: 'pointer' }}>Нажмите на точки, чтобы изменить уровень. Как оценивать?</summary>
+        <div style={{ marginTop: 6, lineHeight: 1.5 }}>
+          <div><b>— </b>ещё не делал или не допускается к этому участку.</div>
+          <div><b>Учится:</b> делает под присмотром, нужны подсказки, результат нестабилен.</div>
+          <div><b>Уверенно:</b> сам делает по стандарту в загруженной смене, без ошибок.</div>
+          <div><b>Может учить:</b> объясняет, замечает и исправляет ошибки других, можно ставить наставником.</div>
+          <div style={{ marginTop: 4 }}>Ставьте уровень по тому, что видели сами на смене, а не со слов.</div>
+        </div>
+      </details>
 
       <div className="card">
         <h2>Добавить сотрудника</h2>
