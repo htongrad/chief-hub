@@ -16,11 +16,15 @@ import {
   dialIssues,
   equipmentDue,
   fmt,
+  fmtQty,
+  fmtStock,
+  itemAt,
   lastWeek,
   locName,
   overdueEquipmentCount,
   serviceScore,
   stability,
+  stockOf,
   weekSummary,
 } from './store';
 import type { AppState } from './types';
@@ -151,13 +155,32 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
     });
   }
 
-  // Склад: остатки по точкам, ниже минимума подсвечено
+  // Склад: сток по точкам (кг, л, шт), ниже минимального остатка подсвечено
   sheets.push({
     name: 'Остатки',
-    header: ['Позиция', 'Категория', 'Ед.', 'Минимум', ...state.locations.map((l) => l.name)],
-    rows: state.inventory.map((it) => row(it.name, it.category, it.unit, it.par, ...state.locations.map((l) => it.qty[l.id] ?? 0))),
-    marks: state.inventory.map((it) => mk('', '', '', '', ...state.locations.map((l) => ((it.qty[l.id] ?? 0) < it.par ? 'bad' : 'ok') as Mark))),
-    widths: [200, 140, 60, 80],
+    header: ['Позиция', 'Категория', 'Ед. стока', 'Минимальный остаток', 'Где есть', ...state.locations.map((l) => l.name)],
+    rows: state.inventory.map((it) =>
+      row(
+        it.name,
+        it.category,
+        fmtStock(it.unit, 0).split(' ')[1],
+        fmtStock(it.unit, it.par).split(' ')[0],
+        it.allLocations ? 'Все точки' : it.locationIds.map(ln).join(', '),
+        ...state.locations.map((l) => (itemAt(it, l.id) ? fmtStock(it.unit, stockOf(state, it, l.id)).split(' ')[0] : '—'))
+      )
+    ),
+    marks: state.inventory.map((it) => mk('', '', '', '', '', ...state.locations.map((l) => (!itemAt(it, l.id) ? '' : stockOf(state, it, l.id) < it.par ? 'bad' : 'ok') as Mark))),
+    widths: [200, 140, 80, 120, 160],
+  });
+
+  sheets.push({
+    name: 'Приходы',
+    header: ['Дата', 'Точка', 'Позиция', 'Количество'],
+    rows: [...state.receipts].sort(byDateDesc).map((x) => {
+      const it = state.inventory.find((i) => i.id === x.itemId);
+      return row(x.date, ln(x.locationId), it?.name ?? '—', it ? fmtStock(it.unit, x.qty) : x.qty);
+    }),
+    widths: [100, 140, 200, 100],
   });
 
   sheets.push({
@@ -165,9 +188,18 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
     header: ['Дата', 'Точка', 'Позиция', 'Количество', 'Причина'],
     rows: [...state.writeOffs].sort(byDateDesc).map((w) => {
       const it = state.inventory.find((x) => x.id === w.itemId);
-      return row(w.date, ln(w.locationId), it?.name ?? '—', `${w.qty} ${it?.unit ?? ''}`.trim(), w.reason);
+      return row(w.date, ln(w.locationId), it?.name ?? '—', it ? fmtQty(it.unit, w.qty) : w.qty, w.reason);
     }),
     widths: [100, 140, 200, 100, 200],
+  });
+
+  sheets.push({
+    name: 'Расход за день',
+    header: ['Дата', 'Точка', 'Позиция', 'Продано, шт'],
+    rows: [...state.daySales].sort(byDateDesc).flatMap((d) =>
+      d.lines.map((l) => row(d.date, ln(d.locationId), state.recipes.find((r) => r.id === l.recipeId)?.name ?? '—', l.count))
+    ),
+    widths: [100, 140, 220, 100],
   });
 
   // Показатели по неделям

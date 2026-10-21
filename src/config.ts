@@ -10,7 +10,7 @@ export const MODULES: { id: ModuleId; title: string; icon: string; locked?: bool
   { id: 'overview', title: 'Обзор', icon: '◎', locked: true, hint: 'Показатели и сигналы: что сегодня требует внимания' },
   { id: 'quality', title: 'Качество', icon: '☕', hint: 'Вкус и меню: настройка помола, оценки кофе под фильтр, стандарты напитков' },
   { id: 'team', title: 'Команда', icon: '☺', hint: 'Люди: матрица навыков и аттестации' },
-  { id: 'inventory', title: 'Склад', icon: '▤', hint: 'Цифры: остатки, закупка, списания' },
+  { id: 'inventory', title: 'Склад', icon: '▤', hint: 'Цифры: сток, приходы, списания, закупка' },
   { id: 'metrics', title: 'Показатели', icon: '▲', hint: 'Цифры: выручка, средний чек, себестоимость' },
   { id: 'equipment', title: 'Оборудование', icon: '⚒', hint: 'График ТО и заявки на ремонт' },
   { id: 'rounds', title: 'Обходы', icon: '✔', hint: 'Гость и точки: обходы, тайный гость, жалобы' },
@@ -51,7 +51,14 @@ export const DEFAULT_EQUIPMENT: { kind: EquipmentKind; name: string; intervalDay
   { kind: 'water', name: 'Фильтр воды', intervalDays: 180 },
 ];
 
-export const WRITE_OFF_REASONS = ['Срок годности', 'Брак напитка', 'Пролив или ошибка', 'Недостача при подсчёте', 'Прочее'];
+export const WRITE_OFF_REASONS = [
+  'Порча',
+  'Настройка помола',
+  'Проработка новых напитков',
+  'Дегустация новых напитков',
+  'Фотосессия новых напитков',
+  'Тренировка бариста',
+];
 
 /** Чек-лист обхода точки. Группы идут в порядке блоков инструкции. */
 export const ROUND_CHECKS: { group: string; items: { id: string; text: string }[] }[] = [

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { AppState, Attestation, DialIn, EspressoTarget, Equipment, Recipe, Settings } from './types';
+import type { AppState, Attestation, BaseUnit, DialIn, EspressoTarget, Equipment, InventoryItem, Recipe, Settings, WriteOff } from './types';
 import { defaultModules, makeSeed } from './seed';
 
 /**
@@ -14,18 +14,148 @@ export interface StorageAdapter {
 
 const KEY = 'chief-hub:v1';
 
+// ——— Единицы учёта ———
+// Внутри всё хранится в базовых единицах (г, мл, шт). Списания и приходы вводятся в удобных
+// единицах, остатки показываются в кг, л и шт, как в кассовой системе.
+
+const UNIT_ALIASES: Record<string, { base: BaseUnit; factor: number }> = {
+  г: { base: 'g', factor: 1 },
+  гр: { base: 'g', factor: 1 },
+  кг: { base: 'g', factor: 1000 },
+  мл: { base: 'ml', factor: 1 },
+  л: { base: 'ml', factor: 1000 },
+  шт: { base: 'pcs', factor: 1 },
+};
+
+/** Разбирает единицу из текста («г», «кг», «шт.»). Для незнакомой единицы возвращает null. */
+export function parseUnit(raw: string): { base: BaseUnit; factor: number } | null {
+  return UNIT_ALIASES[raw.trim().toLowerCase().replace(/\.$/, '')] ?? null;
+}
+
+export const BASE_LABEL: Record<BaseUnit, string> = { g: 'г', ml: 'мл', pcs: 'шт' };
+export const STOCK_LABEL: Record<BaseUnit, string> = { g: 'кг', ml: 'л', pcs: 'шт' };
+export const STOCK_FACTOR: Record<BaseUnit, number> = { g: 1000, ml: 1000, pcs: 1 };
+/** Единицы для ввода прихода: так же, как привозят поставщики. */
+export const RECEIPT_UNITS: { label: string; base: BaseUnit; factor: number }[] = [
+  { label: 'кг', base: 'g', factor: 1000 },
+  { label: 'л', base: 'ml', factor: 1000 },
+  { label: 'шт', base: 'pcs', factor: 1 },
+];
+
+const trimNum = (n: number) => String(Math.round(n * 1000) / 1000).replace('.', ',');
+/** Остаток в единицах стока: кг, л, шт. */
+export const fmtStock = (unit: BaseUnit, q: number) => `${trimNum(q / STOCK_FACTOR[unit])} ${STOCK_LABEL[unit]}`;
+/** Количество в базовых единицах; крупные значения показываем в кг и л. */
+export const fmtQty = (unit: BaseUnit, q: number) => (unit !== 'pcs' && Math.abs(q) >= 1000 ? fmtStock(unit, q) : `${trimNum(q)} ${BASE_LABEL[unit]}`);
+
+const normName = (s: string) => s.trim().toLowerCase();
+
+/** Применима ли позиция на точке (на всех точках или отмечена галочкой). */
+export const itemAt = (it: InventoryItem, locationId: string) => it.allLocations || it.locationIds.includes(locationId);
+
 /**
- * Приводит сохранённые данные к текущей версии (2).
+ * Связывает ингредиенты стандартов с банком ингредиентов: если позиции с таким названием нет,
+ * она создаётся (на всех точках), и ингредиент получает ссылку на неё. Единицы вне г/кг/мл/л/шт
+ * (например, «шот») в сток не попадают. Безопасно вызывать повторно.
+ */
+export function linkIngredients(inventory: InventoryItem[], recipes: Recipe[]): { inventory: InventoryItem[]; recipes: Recipe[] } {
+  const inv = [...inventory];
+  const linked = recipes.map((r) => ({
+    ...r,
+    ingredients: r.ingredients.map((i) => {
+      const plain = { name: i.name, amount: i.amount, unit: i.unit };
+      const u = parseUnit(i.unit);
+      if (!u || !i.name.trim()) return plain;
+      const byId = i.itemId ? inv.find((x) => x.id === i.itemId) : undefined;
+      let item = byId && byId.unit === u.base ? byId : inv.find((x) => normName(x.name) === normName(i.name) && x.unit === u.base);
+      if (!item) {
+        if (inv.some((x) => normName(x.name) === normName(i.name))) return plain; // то же название, другая единица
+        item = { id: uid(), name: i.name.trim(), category: 'Из стандартов', unit: u.base, par: 0, allLocations: true, locationIds: [], opening: {} };
+        inv.push(item);
+      }
+      return { ...plain, itemId: item.id };
+    }),
+  }));
+  return { inventory: inv, recipes: linked };
+}
+
+/** Расход позиции на точке по продажам за все дни: количество × норма из стандарта. */
+export function usageOf(state: AppState, itemId: string, locationId: string): number {
+  let total = 0;
+  state.daySales.forEach((d) => {
+    if (d.locationId !== locationId) return;
+    d.lines.forEach((ln) => {
+      const r = state.recipes.find((x) => x.id === ln.recipeId);
+      r?.ingredients.forEach((i) => {
+        if (i.itemId !== itemId) return;
+        const amount = parseFloat(i.amount.replace(',', '.'));
+        const u = parseUnit(i.unit);
+        if (u && amount > 0) total += ln.count * amount * u.factor;
+      });
+    });
+  });
+  return total;
+}
+
+/** Остаток на точке = стартовый + приходы − списания − расход по продажам (в базовых единицах). */
+export function stockOf(state: AppState, it: InventoryItem, locationId: string): number {
+  const inn = state.receipts.filter((x) => x.itemId === it.id && x.locationId === locationId).reduce((a, x) => a + x.qty, 0);
+  const out = state.writeOffs.filter((x) => x.itemId === it.id && x.locationId === locationId).reduce((a, x) => a + x.qty, 0);
+  return (it.opening[locationId] ?? 0) + inn - out - usageOf(state, it.id, locationId);
+}
+
+/** Список закупки: сколько довезти до минимального остатка суммарно по выбранным точкам. */
+export function reorderList(state: AppState, locationIds: string[]): { item: InventoryItem; need: number }[] {
+  return state.inventory
+    .map((item) => ({
+      item,
+      need: locationIds.reduce((a, id) => (itemAt(item, id) ? a + Math.max(0, item.par - stockOf(state, item, id)) : a), 0),
+    }))
+    .filter((x) => x.need > 0);
+}
+
+/**
+ * Приводит сохранённые данные к текущей версии (4).
  * Версия 1 (до разделов «Оборудование», «Обходы», «Отчёт») получает пустые новые списки
- * и значения норм по умолчанию. Возвращает null, если данные не похожи на Chief Hub.
+ * и значения норм по умолчанию. Версия 3 хранила склад в свободных единицах — переводим
+ * в г, мл и шт (кг → г, л → мл, прочее считаем штуками). Ингредиенты стандартов попадают
+ * в банк ингредиентов. Возвращает null, если данные не похожи на Chief Hub.
  */
 export function migrate(raw: unknown): AppState | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Partial<Omit<AppState, 'version' | 'settings'>> & { version?: number; settings?: Partial<Settings> };
-  if (![1, 2, 3].includes(r.version ?? 0) || !Array.isArray(r.locations) || !r.settings) return null;
+  if (![1, 2, 3, 4].includes(r.version ?? 0) || !Array.isArray(r.locations) || !r.settings) return null;
   const s = r.settings;
+
+  // Склад: старые позиции (до версии 4) переводим в базовые единицы
+  type OldItem = { id: string; name: string; category?: string; unit?: string; par?: number; qty?: Record<string, number> };
+  const factors = new Map<string, number>();
+  const inventory0: InventoryItem[] = (r.inventory ?? []).map((raw) => {
+    const x = raw as unknown as OldItem & Partial<InventoryItem>;
+    if (x.opening) return { ...(x as InventoryItem), allLocations: x.allLocations ?? true, locationIds: x.locationIds ?? [] };
+    const u = parseUnit(x.unit ?? '') ?? { base: 'pcs' as BaseUnit, factor: 1 };
+    factors.set(x.id, u.factor);
+    const opening: Record<string, number> = {};
+    Object.entries(x.qty ?? {}).forEach(([k, v]) => (opening[k] = v * u.factor));
+    return { id: x.id, name: x.name, category: x.category ?? 'Прочее', unit: u.base, par: (x.par ?? 0) * u.factor, allLocations: true, locationIds: [], opening };
+  });
+  const writeOffs0: WriteOff[] = (r.writeOffs ?? []).map((w) => (factors.has(w.itemId) ? { ...w, qty: w.qty * (factors.get(w.itemId) ?? 1) } : w));
+  const recipes0: Recipe[] = (r.recipes ?? []).map((x) => {
+    // Версия 2 хранила рецептуру одной строкой (spec): переносим её в способ приготовления.
+    const old = x as Recipe & { spec?: string };
+    return {
+      id: x.id,
+      name: x.name,
+      ingredients: x.ingredients ?? [],
+      method: x.method ?? old.spec ?? '',
+      guestDescription: x.guestDescription ?? '',
+      updated: x.updated,
+    };
+  });
+  const linked = linkIngredients(inventory0, recipes0);
+
   return {
-    version: 3,
+    version: 4,
     settings: {
       networkName: s.networkName ?? 'Моя сеть',
       currency: s.currency ?? '₽',
@@ -40,21 +170,12 @@ export function migrate(raw: unknown): AppState | null {
     staff: r.staff ?? [],
     dialIns: r.dialIns ?? [],
     cuppings: (r.cuppings ?? []).map((c) => ({ ...c, comment: c.comment ?? '' })),
-    // Версия 2 хранила рецептуру одной строкой (spec): переносим её в способ приготовления.
-    recipes: (r.recipes ?? []).map((x) => {
-      const old = x as Recipe & { spec?: string };
-      return {
-        id: x.id,
-        name: x.name,
-        ingredients: x.ingredients ?? [],
-        method: x.method ?? old.spec ?? '',
-        guestDescription: x.guestDescription ?? '',
-        updated: x.updated,
-      };
-    }),
+    recipes: linked.recipes,
     attestations: r.attestations ?? [],
-    inventory: r.inventory ?? [],
-    writeOffs: r.writeOffs ?? [],
+    inventory: linked.inventory,
+    receipts: r.receipts ?? [],
+    writeOffs: writeOffs0,
+    daySales: r.daySales ?? [],
     metrics: r.metrics ?? [],
     equipment: r.equipment ?? [],
     repairs: r.repairs ?? [],
@@ -258,8 +379,9 @@ export function buildSignals(state: AppState, scope: string): Signal[] {
     .forEach((m) => out.push({ level: 'warn', title: `${ln(m.locationId)}: себестоимость выше цели`, detail: `${m.cogsPct}% при цели ${settings.cogsTargetPct}% (неделя ${m.week})` }));
   state.inventory.forEach((it) =>
     locs.forEach((l) => {
-      const q = it.qty[l.id] ?? 0;
-      if (q < it.par) out.push({ level: 'warn', title: `${it.name} · ${l.name}`, detail: `осталось ${q} ${it.unit}, минимум ${it.par} ${it.unit}` });
+      if (!itemAt(it, l.id)) return;
+      const q = stockOf(state, it, l.id);
+      if (q < it.par) out.push({ level: 'warn', title: `${it.name} · ${l.name}`, detail: `осталось ${fmtStock(it.unit, q)}, минимальный остаток ${fmtStock(it.unit, it.par)}` });
     })
   );
 
@@ -345,7 +467,7 @@ export function buildReport(state: AppState, scope: string): ReportData {
   }
   const offs = state.writeOffs.filter((o) => inScope(o.locationId, scope) && within(o.date, 7));
   nums.push(`Списаний за 7 дней: ${offs.length}`);
-  const byItem = new Map<string, { name: string; unit: string; qty: number }>();
+  const byItem = new Map<string, { name: string; unit: BaseUnit; qty: number }>();
   offs.forEach((o) => {
     const it = state.inventory.find((i) => i.id === o.itemId);
     if (!it) return;
@@ -356,7 +478,7 @@ export function buildReport(state: AppState, scope: string): ReportData {
   [...byItem.values()]
     .sort((a, b) => b.qty - a.qty)
     .slice(0, 3)
-    .forEach((x) => nums.push(`Больше всего списано: ${x.name}, ${x.qty} ${x.unit}`));
+    .forEach((x) => nums.push(`Больше всего списано: ${x.name}, ${fmtQty(x.unit, x.qty)}`));
   sections.push({ title: 'Цифры', lines: nums });
 
   // Оборудование и санитария
