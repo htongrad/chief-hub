@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { AppState, Attestation, BaseUnit, DialIn, EspressoTarget, Equipment, InventoryItem, Recipe, Settings, WriteOff } from './types';
+import type { AppState, Attestation, BaseUnit, DialIn, EspressoTarget, Equipment, InventoryItem, Recipe, Settings, Stocktake, WriteOff } from './types';
 import { defaultModules, makeSeed } from './seed';
 
 /**
@@ -104,6 +104,38 @@ export function stockOf(state: AppState, it: InventoryItem, locationId: string):
   return (it.opening[locationId] ?? 0) + inn - out - usageOf(state, it.id, locationId);
 }
 
+/** Расхождение факта и расчёта в процентах от большей из величин. */
+export const countDiffPct = (expected: number, actual: number) => {
+  const m = Math.max(Math.abs(expected), Math.abs(actual));
+  return m > 0 ? (Math.abs(actual - expected) / m) * 100 : 0;
+};
+
+/** Последний пересчёт позиции на точке (по дате; при равных датах — более поздняя запись). */
+export function lastCount(state: AppState, itemId: string, locationId: string): { date: string; expected: number; actual: number } | null {
+  let best: { date: string; expected: number; actual: number } | null = null;
+  state.stocktakes.forEach((t) => {
+    if (t.locationId !== locationId) return;
+    const l = t.lines.find((x) => x.itemId === itemId);
+    if (l && (!best || t.date >= best.date)) best = { date: t.date, expected: l.expected, actual: l.actual };
+  });
+  return best;
+}
+
+/** Проблемные позиции: по итогам последнего пересчёта расхождение выше порога из Настроек. */
+export function problemItems(state: AppState, locationIds: string[]): { item: InventoryItem; locationId: string; date: string; expected: number; actual: number; pct: number }[] {
+  const out: { item: InventoryItem; locationId: string; date: string; expected: number; actual: number; pct: number }[] = [];
+  state.inventory.forEach((item) =>
+    locationIds.forEach((locationId) => {
+      if (!itemAt(item, locationId)) return;
+      const c = lastCount(state, item.id, locationId);
+      if (!c) return;
+      const pct = countDiffPct(c.expected, c.actual);
+      if (pct > state.settings.stocktakeTolPct) out.push({ item, locationId, ...c, pct });
+    })
+  );
+  return out.sort((a, b) => b.pct - a.pct);
+}
+
 /** Список закупки: сколько довезти до минимального остатка суммарно по выбранным точкам. */
 export function reorderList(state: AppState, locationIds: string[]): { item: InventoryItem; need: number }[] {
   return state.inventory
@@ -115,7 +147,7 @@ export function reorderList(state: AppState, locationIds: string[]): { item: Inv
 }
 
 /**
- * Приводит сохранённые данные к текущей версии (4).
+ * Приводит сохранённые данные к текущей версии (5).
  * Версия 1 (до разделов «Оборудование», «Обходы», «Отчёт») получает пустые новые списки
  * и значения норм по умолчанию. Версия 3 хранила склад в свободных единицах — переводим
  * в г, мл и шт (кг → г, л → мл, прочее считаем штуками). Ингредиенты стандартов попадают
@@ -124,7 +156,7 @@ export function reorderList(state: AppState, locationIds: string[]): { item: Inv
 export function migrate(raw: unknown): AppState | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Partial<Omit<AppState, 'version' | 'settings'>> & { version?: number; settings?: Partial<Settings> };
-  if (![1, 2, 3, 4].includes(r.version ?? 0) || !Array.isArray(r.locations) || !r.settings) return null;
+  if (![1, 2, 3, 4, 5].includes(r.version ?? 0) || !Array.isArray(r.locations) || !r.settings) return null;
   const s = r.settings;
 
   // Склад: старые позиции (до версии 4) переводим в базовые единицы
@@ -155,7 +187,7 @@ export function migrate(raw: unknown): AppState | null {
   const linked = linkIngredients(inventory0, recipes0);
 
   return {
-    version: 4,
+    version: 5,
     settings: {
       networkName: s.networkName ?? 'Моя сеть',
       currency: s.currency ?? '₽',
@@ -165,6 +197,7 @@ export function migrate(raw: unknown): AppState | null {
       cogsTargetPct: s.cogsTargetPct ?? 28,
       attestDays: s.attestDays ?? 180,
       visitMinScore: s.visitMinScore ?? 80,
+      stocktakeTolPct: s.stocktakeTolPct ?? 5,
     },
     locations: r.locations,
     staff: r.staff ?? [],
@@ -174,6 +207,7 @@ export function migrate(raw: unknown): AppState | null {
     attestations: r.attestations ?? [],
     inventory: linked.inventory,
     receipts: r.receipts ?? [],
+    stocktakes: r.stocktakes ?? [],
     writeOffs: writeOffs0,
     daySales: r.daySales ?? [],
     metrics: r.metrics ?? [],
@@ -383,6 +417,11 @@ export function buildSignals(state: AppState, scope: string): Signal[] {
       const q = stockOf(state, it, l.id);
       if (q < it.par) out.push({ level: 'warn', title: `${it.name} · ${l.name}`, detail: `осталось ${fmtStock(it.unit, q)}, минимальный остаток ${fmtStock(it.unit, it.par)}` });
     })
+  );
+
+  // Инвентаризация: позиции с расхождением выше порога
+  problemItems(state, locs.map((l) => l.id)).forEach((p) =>
+    out.push({ level: 'warn', title: `Пересчитать: ${p.item.name} · ${ln(p.locationId)}`, detail: `на ${p.date} факт ${fmtStock(p.item.unit, p.actual)}, по расчёту ${fmtStock(p.item.unit, p.expected)} (расхождение ${Math.round(p.pct)}%)` })
   );
 
   // Оборудование: ТО просрочено или скоро, открытые заявки

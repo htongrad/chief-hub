@@ -13,6 +13,7 @@ import {
   attestSummary,
   buildReport,
   buildSignals,
+  countDiffPct,
   dialIssues,
   equipmentDue,
   fmt,
@@ -171,6 +172,19 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
     ),
     marks: state.inventory.map((it) => mk('', '', '', '', '', ...state.locations.map((l) => (!itemAt(it, l.id) ? '' : stockOf(state, it, l.id) < it.par ? 'bad' : 'ok') as Mark))),
     widths: [200, 140, 80, 120, 160],
+  });
+
+  sheets.push({
+    name: 'Инвентаризации',
+    header: ['Дата', 'Точка', 'Позиция', 'По расчёту', 'Факт', 'Разница', 'Расхождение, %'],
+    rows: [...state.stocktakes].sort(byDateDesc).flatMap((t) =>
+      t.lines.map((l) => {
+        const it = state.inventory.find((i) => i.id === l.itemId);
+        return row(t.date, ln(t.locationId), it?.name ?? '—', it ? fmtStock(it.unit, l.expected) : l.expected, it ? fmtStock(it.unit, l.actual) : l.actual, it ? fmtStock(it.unit, l.actual - l.expected) : l.actual - l.expected, Math.round(countDiffPct(l.expected, l.actual)));
+      })
+    ),
+    marks: [...state.stocktakes].sort(byDateDesc).flatMap((t) => t.lines.map((l) => mk('', '', '', '', '', '', countDiffPct(l.expected, l.actual) > settings.stocktakeTolPct ? 'bad' : 'ok'))),
+    widths: [100, 140, 200, 110, 110, 110, 110],
   });
 
   sheets.push({

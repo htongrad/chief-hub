@@ -1,4 +1,4 @@
-import type { AppState, Attestation, Complaint, DialIn, Equipment, BaseUnit, DaySales, InventoryItem, MetricEntry, ModuleId, Receipt, Recipe, Repair, Staff, Visit, WriteOff } from './types';
+import type { AppState, Attestation, Complaint, DialIn, Equipment, BaseUnit, DaySales, InventoryItem, MetricEntry, ModuleId, Receipt, Recipe, Repair, Staff, Stocktake, Visit, WriteOff } from './types';
 
 /** Все разделы включены. Используется для демо и при переносе данных старой версии. */
 export const defaultModules = (): Record<ModuleId, boolean> => ({
@@ -129,6 +129,11 @@ export function makeSeed(): AppState {
     { id: 'rp2', locationId: 'l2', itemId: 'i3', qty: 24000, date: iso(2) },
   ];
 
+  // Пересчёт на прошлой неделе: молоко на второй точке разошлось с расчётом
+  const stocktakes: Stocktake[] = [
+    { id: 'st1', locationId: 'l2', date: iso(5), lines: [{ itemId: 'i3', expected: 38000, actual: 33000 }, { itemId: 'i1', expected: 5000, actual: 4950 }] },
+  ];
+
   const writeOffs: WriteOff[] = [
     { id: 'w1', locationId: 'l1', itemId: 'i3', qty: 2000, reason: 'Порча', date: iso(1) },
     { id: 'w2', locationId: 'l2', itemId: 'i1', qty: 250, reason: 'Настройка помола', date: iso(3) },
@@ -187,7 +192,7 @@ export function makeSeed(): AppState {
   const complaints: Complaint[] = [{ id: 'cm1', locationId: 'l2', date: iso(1), text: 'Долгое ожидание в утренний пик', resolved: false }];
 
   return {
-    version: 4,
+    version: 5,
     settings: {
       networkName: 'Моя сеть',
       currency: '₽',
@@ -197,6 +202,7 @@ export function makeSeed(): AppState {
       cogsTargetPct: 28,
       attestDays: 180,
       visitMinScore: 80,
+      stocktakeTolPct: 5,
     },
     locations,
     staff,
@@ -206,6 +212,7 @@ export function makeSeed(): AppState {
     attestations,
     inventory,
     receipts,
+    stocktakes,
     writeOffs,
     daySales,
     metrics,
