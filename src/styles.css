@@ -77,6 +77,8 @@ button { cursor: pointer; }
 .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
 .btn.danger { background: transparent; color: var(--bad); border: 1px solid var(--line); }
 .btn.sm { padding: 5px 10px; font-size: 13px; }
+a.btn { display: inline-block; text-decoration: none; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
 input, select, textarea { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; min-width: 0; }
 input[type='checkbox'] { width: 18px; height: 18px; padding: 0; accent-color: var(--accent); }
 input[type='number'] { width: 92px; }

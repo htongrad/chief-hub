@@ -1,6 +1,93 @@
 import { useRef, useState } from 'react';
 import { MODULES } from '../config';
 import { migrate, uid, useStore } from '../store';
+import { APPS_SCRIPT, isScriptUrl, pushBackup, saveBackupConfig, useBackupConfig } from '../backup';
+
+/** Блок «Резервная копия на Google Диске»: адрес скрипта, автосохранение, статус. */
+function DriveBackup() {
+  const { state } = useStore();
+  const cfg = useBackupConfig();
+  const [url, setUrl] = useState(cfg.url);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const ready = isScriptUrl(cfg.url);
+
+  const copyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(APPS_SCRIPT);
+      setNote('Код скопирован. Вставьте его в редактор скрипта.');
+    } catch {
+      setNote('Не получилось скопировать автоматически. Откройте «Показать код» ниже и скопируйте вручную.');
+    }
+  };
+  const saveUrl = () => {
+    const u = url.trim();
+    if (!isScriptUrl(u)) return setNote('Адрес должен начинаться с https://script.google.com/macros/s/ и заканчиваться на /exec.');
+    saveBackupConfig({ url: u, lastError: null });
+    setNote('Адрес сохранён. Сохраняю первую копию…');
+    void runNow();
+  };
+  const runNow = async () => {
+    setBusy(true);
+    const ok = await pushBackup(state);
+    setBusy(false);
+    setNote(ok ? 'Готово: копия на Диске.' : '');
+  };
+
+  return (
+    <div className="card">
+      <h2>Резервная копия на Google Диске</h2>
+      <p className="muted small" style={{ marginBottom: 10 }}>
+        Данные панели хранятся только в этом браузере. Копия на вашем Google Диске защищает их и показывает всё в виде таблицы: папка «Chief Hub», таблица по разделам и копии данных за последние 30 дней.
+      </p>
+
+      <div className="alert" style={{ marginBottom: 10 }}>
+        <div style={{ flex: 1 }} className="small">
+          {!ready && <>Не настроено. Инструкция в шагах ниже.</>}
+          {ready && cfg.lastOk && <>Последняя копия: <b>{new Date(cfg.lastOk).toLocaleString('ru-RU')}</b>{cfg.auto ? ' · автосохранение включено' : ' · только вручную'}</>}
+          {ready && !cfg.lastOk && !cfg.lastError && <>Адрес сохранён, копий ещё не было.</>}
+          {cfg.lastError && <div style={{ color: 'var(--bad)', marginTop: 4 }}>{cfg.lastError}</div>}
+        </div>
+      </div>
+
+      <ol className="small" style={{ paddingLeft: 18, margin: '0 0 10px' }}>
+        <li>Нажмите «Скопировать код скрипта».</li>
+        <li>Откройте script.google.com, войдите в свой Google, нажмите «Новый проект», удалите всё в редакторе и вставьте код.</li>
+        <li>Нажмите «Сохранить», затем «Развернуть» → «Новое развертывание» → тип «Веб-приложение». Выполнять от имени: «Я». Доступ: «Все».</li>
+        <li>Разрешите доступ к своему аккаунту. Если Google предупредит, что приложение не проверено: «Дополнительные настройки» → «Перейти на страницу проекта».</li>
+        <li>Скопируйте «URL веб-приложения» (заканчивается на /exec), вставьте его ниже и нажмите «Сохранить адрес».</li>
+      </ol>
+
+      <div className="row" style={{ flexWrap: 'wrap' }}>
+        <button className="btn ghost" onClick={copyCode}>Скопировать код скрипта</button>
+      </div>
+      <details style={{ marginTop: 8 }}>
+        <summary className="small muted">Показать код</summary>
+        <textarea readOnly rows={8} style={{ width: '100%', marginTop: 6, fontFamily: 'monospace', fontSize: 12 }} value={APPS_SCRIPT} onFocus={(e) => e.currentTarget.select()} />
+      </details>
+
+      <div className="row" style={{ marginTop: 10 }}>
+        <input style={{ flex: 1 }} placeholder="https://script.google.com/macros/s/…/exec" value={url} onChange={(e) => setUrl(e.target.value)} aria-label="Адрес веб-приложения" />
+        <button className="btn" onClick={saveUrl}>Сохранить адрес</button>
+      </div>
+
+      <label className="toggle" style={{ marginTop: 10 }}>
+        <span><b>Сохранять автоматически</b><div className="small muted">Через минуту после изменений и при открытии панели, если копии не было больше 6 часов.</div></span>
+        <input type="checkbox" checked={cfg.auto} onChange={(e) => saveBackupConfig({ auto: e.target.checked })} />
+      </label>
+
+      <div className="row" style={{ marginTop: 10, flexWrap: 'wrap' }}>
+        <button className="btn" disabled={!ready || busy} onClick={runNow}>{busy ? 'Сохраняю…' : 'Сохранить сейчас'}</button>
+        {cfg.sheetUrl && <a className="btn ghost" href={cfg.sheetUrl} target="_blank" rel="noreferrer">Открыть таблицу</a>}
+        {cfg.folderUrl && <a className="btn ghost" href={cfg.folderUrl} target="_blank" rel="noreferrer">Открыть папку</a>}
+      </div>
+      {note && <p className="small" style={{ marginTop: 10 }}>{note}</p>}
+      <p className="small muted" style={{ marginTop: 10 }}>
+        Адрес скрипта никому не передавайте: по нему можно записать данные в вашу таблицу. Восстановить данные: скачайте с Диска файл chief-hub-backup.json и нажмите «Загрузить из файла» в блоке «Данные».
+      </p>
+    </div>
+  );
+}
 
 export default function SettingsPage() {
   const { state, update, replace, resetDemo } = useStore();
@@ -139,6 +226,8 @@ export default function SettingsPage() {
           <div className="f">Минимальный балл обхода, %<input type="number" min={0} max={100} value={settings.visitMinScore} onChange={(e) => setS({ visitMinScore: num(e.target.value, 80) })} /></div>
         </div>
       </div>
+
+      <DriveBackup />
 
       <div className="card">
         <h2>Данные</h2>
