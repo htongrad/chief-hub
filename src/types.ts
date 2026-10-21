@@ -97,6 +97,14 @@ export interface InventoryItem {
   opening: Record<string, number>;
 }
 
+/** Инвентаризация: фактический остаток по позициям точки на дату. Количества в базовых единицах. */
+export interface Stocktake {
+  id: string;
+  locationId: string;
+  date: string;
+  lines: { itemId: string; expected: number; actual: number }[];
+}
+
 /** Приход: поставка позиции на точку. */
 export interface Receipt {
   id: string;
@@ -193,10 +201,12 @@ export interface Settings {
   attestDays: number;
   /** Минимальный балл обхода, % */
   visitMinScore: number;
+  /** Допустимое расхождение факта и расчётного остатка при инвентаризации, % */
+  stocktakeTolPct: number;
 }
 
 export interface AppState {
-  version: 4;
+  version: 5;
   settings: Settings;
   locations: Location[];
   staff: Staff[];
@@ -206,6 +216,7 @@ export interface AppState {
   attestations: Attestation[];
   inventory: InventoryItem[];
   receipts: Receipt[];
+  stocktakes: Stocktake[];
   writeOffs: WriteOff[];
   daySales: DaySales[];
   metrics: MetricEntry[];

@@ -118,6 +118,7 @@ export default function SettingsPage() {
         cuppings: s.cuppings.filter((x) => x.locationId !== id),
         writeOffs: s.writeOffs.filter((x) => x.locationId !== id),
         receipts: s.receipts.filter((x) => x.locationId !== id),
+        stocktakes: s.stocktakes.filter((x) => x.locationId !== id),
         daySales: s.daySales.filter((x) => x.locationId !== id),
         inventory: s.inventory.map((it) => {
           const opening = { ...it.opening };
@@ -165,6 +166,7 @@ export default function SettingsPage() {
       recipes: [],
       inventory: [],
       receipts: [],
+      stocktakes: [],
       writeOffs: [],
       daySales: [],
       metrics: [],
@@ -233,6 +235,7 @@ export default function SettingsPage() {
           <div className="f">Целевая себестоимость, %<input type="number" step="0.5" min={0} max={100} value={settings.cogsTargetPct} onChange={(e) => setS({ cogsTargetPct: num(e.target.value, 28) })} /></div>
           <div className="f">Аттестация действует, дн.<input type="number" min={1} value={settings.attestDays} onChange={(e) => setS({ attestDays: Math.max(1, num(e.target.value, 180)) })} /></div>
           <div className="f">Минимальный балл обхода, %<input type="number" min={0} max={100} value={settings.visitMinScore} onChange={(e) => setS({ visitMinScore: num(e.target.value, 80) })} /></div>
+          <div className="f">Допустимое расхождение при инвентаризации, %<input type="number" min={0} max={100} step="0.5" value={settings.stocktakeTolPct} onChange={(e) => setS({ stocktakeTolPct: Math.max(0, num(e.target.value, 5)) })} /></div>
         </div>
       </div>
 

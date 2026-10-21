@@ -3,6 +3,8 @@ import { WRITE_OFF_REASONS } from '../config';
 import {
   BASE_LABEL,
   RECEIPT_UNITS,
+  countDiffPct,
+  problemItems,
   STOCK_FACTOR,
   STOCK_LABEL,
   daysBetween,
@@ -18,9 +20,10 @@ import {
 } from '../store';
 import type { BaseUnit, InventoryItem } from '../types';
 
-type Tab = 'stock' | 'receipt' | 'writeoff' | 'sales';
+type Tab = 'stock' | 'count' | 'receipt' | 'writeoff' | 'sales';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'stock', label: 'Сток' },
+  { id: 'count', label: 'Инвентаризация' },
   { id: 'receipt', label: 'Приход' },
   { id: 'writeoff', label: 'Списание' },
   { id: 'sales', label: 'Расход за день' },
@@ -85,18 +88,33 @@ export default function Inventory() {
     inventory: s.inventory.filter((i) => i.id !== id),
     receipts: s.receipts.filter((x) => x.itemId !== id),
     writeOffs: s.writeOffs.filter((x) => x.itemId !== id),
+    stocktakes: s.stocktakes.map((t) => ({ ...t, lines: t.lines.filter((l) => l.itemId !== id) })).filter((t) => t.lines.length > 0),
     recipes: s.recipes.map((r) => ({ ...r, ingredients: r.ingredients.map((i) => (i.itemId === id ? { name: i.name, amount: i.amount, unit: i.unit } : i)) })),
   }));
 
-  // Сток считается сам; поправить его можно по факту пересчёта — меняется стартовый остаток
-  const setStock = (itemId: string, locId: string, v: number) =>
+  // ——— Инвентаризация: фактический остаток выравнивает сток, пересчёт остаётся в истории ———
+  const [ct, setCt] = useState({ locationId: defLoc, date: today, onlyProblem: false, facts: {} as Record<string, string> });
+  const problems = problemItems(state, locs.map((l) => l.id));
+  const ctProblemIds = new Set(problemItems(state, [ct.locationId]).map((p) => p.item.id));
+  const ctItems = state.inventory.filter((i) => itemAt(i, ct.locationId) && (!ct.onlyProblem || ctProblemIds.has(i.id)));
+  const saveCount = () => {
+    const entered = ctItems
+      .map((it) => ({ it, v: parseFloat((ct.facts[it.id] ?? '').replace(',', '.')) }))
+      .filter((x) => Number.isFinite(x.v) && x.v >= 0);
+    if (!ct.locationId || !ct.date || entered.length === 0) return;
     update((s) => {
-      const it = s.inventory.find((i) => i.id === itemId);
-      if (!it) return s;
-      const target = Math.max(0, v) * STOCK_FACTOR[it.unit];
-      const opening = round3((it.opening[locId] ?? 0) + target - stockOf(s, it, locId));
-      return { ...s, inventory: s.inventory.map((i) => (i.id === itemId ? { ...i, opening: { ...i.opening, [locId]: opening } } : i)) };
+      const lines = entered.map(({ it, v }) => ({ itemId: it.id, expected: round3(stockOf(s, it, ct.locationId)), actual: round3(v * STOCK_FACTOR[it.unit]) }));
+      const delta = new Map(lines.map((l) => [l.itemId, l.actual - l.expected]));
+      return {
+        ...s,
+        stocktakes: [{ id: uid(), locationId: ct.locationId, date: ct.date, lines }, ...s.stocktakes],
+        inventory: s.inventory.map((i) => (delta.has(i.id) ? { ...i, opening: { ...i.opening, [ct.locationId]: round3((i.opening[ct.locationId] ?? 0) + (delta.get(i.id) ?? 0)) } } : i)),
+      };
     });
+    setCt({ ...ct, facts: {} });
+  };
+  const recentCounts = state.stocktakes.filter((t) => inScope(t.locationId, scope)).sort((a, b) => b.date.localeCompare(a.date));
+
   const setPar = (itemId: string, v: number) =>
     update((s) => ({ ...s, inventory: s.inventory.map((i) => (i.id === itemId ? { ...i, par: Math.max(0, v) * STOCK_FACTOR[i.unit] } : i)) }));
   const setAll = (itemId: string, all: boolean) => update((s) => ({ ...s, inventory: s.inventory.map((i) => (i.id === itemId ? { ...i, allLocations: all, locationIds: all ? [] : s.locations.map((l) => l.id) } : i)) }));
@@ -165,6 +183,7 @@ export default function Inventory() {
   };
   const stockText = (it: InventoryItem, q: number) => `${round3(q / STOCK_FACTOR[it.unit])} ${STOCK_LABEL[it.unit]}`;
 
+  const ctProblems = new Set(problems.map((p) => `${p.item.id}|${p.locationId}`));
   const categories = [...new Set(state.inventory.map((i) => i.category))];
 
   const LocationChecks = ({ all, ids, onAll, onToggle }: { all: boolean; ids: string[]; onAll: (v: boolean) => void; onToggle: (id: string) => void }) => (
@@ -210,7 +229,7 @@ export default function Inventory() {
       {tab === 'stock' && (
         <>
           <p className="muted small">
-            Сток считается сам: стартовый остаток + приходы − списания − расход по продажам (стандарты из «Качества»). Показан в кг, л и шт. Если по факту пересчёта цифра другая, поправьте её в ячейке.
+            Сток считается сам: стартовый остаток + приходы − списания − расход по продажам (стандарты из «Качества»). Показан в кг, л и шт. Если по факту цифра другая, внесите её на вкладке «Инвентаризация». ⚠ — расхождение при последнем пересчёте выше допустимого.
             «Минимальный остаток» — уровень, ниже которого позиция на точке попадёт в список закупки.
           </p>
           {state.inventory.length === 0 && <div className="card"><div className="empty">Банк ингредиентов пуст. Добавьте стандарт в «Качестве» — ингредиенты появятся здесь сами, или добавьте позицию ниже.</div></div>}
@@ -236,8 +255,9 @@ export default function Inventory() {
                           if (!itemAt(i, l.id)) return <td className="num muted" key={l.id}>—</td>;
                           const q = stockOf(state, i, l.id);
                           return (
-                            <td className="num" key={l.id}>
-                              <NumField value={q / STOCK_FACTOR[i.unit]} onCommit={(v) => setStock(i.id, l.id, v)} label={`${i.name}, ${l.name}`} bad={q < i.par} />
+                            <td className="num" key={l.id} style={{ color: q < i.par ? 'var(--bad)' : undefined, fontWeight: q < i.par ? 600 : undefined }}>
+                              {round3(q / STOCK_FACTOR[i.unit])}
+                              {ctProblems.has(`${i.id}|${l.id}`) && <span title="Расхождение при последней инвентаризации"> ⚠</span>}
                             </td>
                           );
                         })}
@@ -273,6 +293,108 @@ export default function Inventory() {
             {msg && <p className="small" style={{ color: 'var(--bad)', marginTop: 8 }}>{msg}</p>}
           </div>
         </>
+      )}
+
+      {tab === 'count' && (
+        <div className="grid two">
+          <div className="card">
+            <h2>Инвентаризация</h2>
+            <p className="muted small" style={{ marginBottom: 10 }}>
+              Внесите фактический остаток в {'кг, л и шт'}. Пустые позиции пропускаются. После сохранения сток на точке станет равен факту, а расхождение с расчётом останется в истории.
+              Позиции с расхождением выше {state.settings.stocktakeTolPct}% (порог в «Настройках») помечаются как проблемные и попадают в «Пересчитать выборочно».
+            </p>
+            <div className="form">
+              <div className="f">Точка
+                <select value={ct.locationId} onChange={(e) => setCt({ ...ct, locationId: e.target.value, facts: {} })}>
+                  {state.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+              </div>
+              <div className="f">Дата<input type="date" value={ct.date} onChange={(e) => setCt({ ...ct, date: e.target.value })} /></div>
+              <div className="f">Какие позиции
+                <select value={ct.onlyProblem ? 'p' : 'a'} onChange={(e) => setCt({ ...ct, onlyProblem: e.target.value === 'p' })}>
+                  <option value="a">Все</option>
+                  <option value="p">Только проблемные ({ctProblemIds.size})</option>
+                </select>
+              </div>
+            </div>
+            {ctItems.length === 0 ? (
+              <p className="muted" style={{ marginTop: 10 }}>{ct.onlyProblem ? 'Проблемных позиций на этой точке нет.' : 'На этой точке нет позиций.'}</p>
+            ) : (
+              <div className="tablewrap" style={{ marginTop: 10 }}>
+                <table>
+                  <thead><tr><th>Позиция</th><th className="num">По расчёту</th><th className="num">Факт</th></tr></thead>
+                  <tbody>
+                    {ctItems.map((i) => {
+                      const exp = stockOf(state, i, ct.locationId);
+                      const raw = ct.facts[i.id] ?? '';
+                      const v = parseFloat(raw.replace(',', '.'));
+                      const pct = Number.isFinite(v) ? countDiffPct(exp, v * STOCK_FACTOR[i.unit]) : null;
+                      return (
+                        <tr key={i.id}>
+                          <td>
+                            <b>{i.name}</b> {ctProblemIds.has(i.id) && <span title="Проблемная позиция">⚠</span>}
+                            {pct !== null && pct > state.settings.stocktakeTolPct && <div className="small" style={{ color: 'var(--bad)' }}>расхождение {Math.round(pct)}%</div>}
+                          </td>
+                          <td className="num">{round3(exp / STOCK_FACTOR[i.unit])} {STOCK_LABEL[i.unit]}</td>
+                          <td className="num"><input type="number" min={0} step="any" style={{ width: 90 }} value={raw} placeholder="—" onChange={(e) => setCt({ ...ct, facts: { ...ct.facts, [i.id]: e.target.value } })} aria-label={`Факт: ${i.name}`} /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="row" style={{ marginTop: 12 }}>
+              <button className="btn" onClick={saveCount} disabled={ctItems.length === 0}>Сохранить пересчёт</button>
+            </div>
+          </div>
+
+          <div className="stack">
+            <div className="card">
+              <h2>Пересчитать выборочно</h2>
+              {problems.length === 0 ? (
+                <p className="muted">Проблемных позиций нет: расхождения в пределах {state.settings.stocktakeTolPct}%.</p>
+              ) : (
+                <div className="tablewrap">
+                  <table>
+                    <tbody>
+                      {problems.map((p) => (
+                        <tr key={p.item.id + p.locationId}>
+                          <td>
+                            <b>{p.item.name}</b>
+                            <div className="small muted">{locName(state, p.locationId)} · {p.date}</div>
+                          </td>
+                          <td className="num">факт {stockText(p.item, p.actual)}<div className="small muted">расчёт {stockText(p.item, p.expected)} · {Math.round(p.pct)}%</div></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <div className="card flat">
+              <div style={{ padding: '14px 16px 0' }}><h2>История пересчётов</h2></div>
+              <div className="tablewrap">
+                <table>
+                  <tbody>
+                    {recentCounts.length === 0 && <tr><td><div className="empty">Пересчётов не было.</div></td></tr>}
+                    {recentCounts.slice(0, 8).map((t) => {
+                      const off = t.lines.filter((l) => countDiffPct(l.expected, l.actual) > state.settings.stocktakeTolPct).length;
+                      return (
+                        <tr key={t.id}>
+                          <td>
+                            <b>{locName(state, t.locationId)} · {t.date}</b>
+                            <div className="small muted">{t.lines.length} поз., с расхождением: {off}</div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {tab === 'receipt' && (
