@@ -117,6 +117,13 @@ export default function SettingsPage() {
         dialIns: s.dialIns.filter((x) => x.locationId !== id),
         cuppings: s.cuppings.filter((x) => x.locationId !== id),
         writeOffs: s.writeOffs.filter((x) => x.locationId !== id),
+        receipts: s.receipts.filter((x) => x.locationId !== id),
+        daySales: s.daySales.filter((x) => x.locationId !== id),
+        inventory: s.inventory.map((it) => {
+          const opening = { ...it.opening };
+          delete opening[id];
+          return { ...it, opening, locationIds: it.locationIds.filter((x) => x !== id) };
+        }),
         metrics: s.metrics.filter((x) => x.locationId !== id),
         equipment: s.equipment.filter((x) => x.locationId !== id),
         repairs: s.repairs.filter((x) => x.locationId !== id),
@@ -157,7 +164,9 @@ export default function SettingsPage() {
       cuppings: [],
       recipes: [],
       inventory: [],
+      receipts: [],
       writeOffs: [],
+      daySales: [],
       metrics: [],
       equipment: [],
       repairs: [],

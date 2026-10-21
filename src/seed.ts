@@ -1,4 +1,4 @@
-import type { AppState, Attestation, Complaint, DialIn, Equipment, InventoryItem, MetricEntry, ModuleId, Recipe, Repair, Staff, Visit, WriteOff } from './types';
+import type { AppState, Attestation, Complaint, DialIn, Equipment, BaseUnit, DaySales, InventoryItem, MetricEntry, ModuleId, Receipt, Recipe, Repair, Staff, Visit, WriteOff } from './types';
 
 /** Все разделы включены. Используется для демо и при переносе данных старой версии. */
 export const defaultModules = (): Record<ModuleId, boolean> => ({
@@ -66,8 +66,7 @@ export function makeSeed(): AppState {
       id: 'rc1',
       name: 'Эспрессо',
       ingredients: [
-        { name: 'Кофе в зёрнах', amount: '18', unit: 'г' },
-        { name: 'Вода (готовый напиток)', amount: '36', unit: 'г' },
+        { name: 'Зерно эспрессо', amount: '18', unit: 'г', itemId: 'i1' },
       ],
       method: 'Доза 18 г, выход 36 г, время 25–30 с. Подача сразу, в прогретую чашку.',
       guestDescription: 'Насыщенный и плотный глоток: сладость карамели и мягкая горчинка в финише.',
@@ -77,8 +76,10 @@ export function makeSeed(): AppState {
       id: 'rc2',
       name: 'Капучино 180 мл',
       ingredients: [
-        { name: 'Эспрессо (двойной)', amount: '2', unit: 'шот' },
-        { name: 'Молоко', amount: '150', unit: 'мл' },
+        { name: 'Зерно эспрессо', amount: '18', unit: 'г', itemId: 'i1' },
+        { name: 'Молоко', amount: '150', unit: 'мл', itemId: 'i3' },
+        { name: 'Стаканы 250 мл', amount: '1', unit: 'шт', itemId: 'i5' },
+        { name: 'Крышки', amount: '1', unit: 'шт', itemId: 'i6' },
       ],
       method: 'Двойной эспрессо и молоко до 180 мл, пена около 1 см. Температура молока 60–65 °C.',
       guestDescription: 'Нежная бархатистая пена и тёплое молоко вокруг крепкого эспрессо.',
@@ -88,8 +89,8 @@ export function makeSeed(): AppState {
       id: 'rc3',
       name: 'Фильтр V60',
       ingredients: [
-        { name: 'Кофе молотый', amount: '15', unit: 'г' },
-        { name: 'Вода', amount: '250', unit: 'мл' },
+        { name: 'Зерно фильтр', amount: '15', unit: 'г', itemId: 'i2' },
+        { name: 'Фильтры V60', amount: '1', unit: 'шт', itemId: 'i8' },
       ],
       method: '15 г кофе на 250 мл воды, общее время 2:45–3:15.',
       guestDescription: 'Чистый и ясный вкус, в котором видно характер зерна.',
@@ -104,25 +105,39 @@ export function makeSeed(): AppState {
     { id: 'at4', staffId: 's7', date: iso(60), passed: true, note: '' },
   ];
 
-  const item = (id: string, name: string, category: string, unit: string, par: number, a: number, b: number, c: number): InventoryItem => ({
-    id, name, category, unit, par, qty: { l1: a, l2: b, l3: c },
-  });
+  // Банк ингредиентов: количества в базовых единицах (г, мл, шт), показываются в кг, л, шт
+  const item = (id: string, name: string, category: string, unit: BaseUnit, parStock: number, a: number, b: number, c: number): InventoryItem => {
+    const k = unit === 'pcs' ? 1 : 1000;
+    return { id, name, category, unit, par: parStock * k, allLocations: true, locationIds: [], opening: { l1: a * k, l2: b * k, l3: c * k } };
+  };
 
   const inventory: InventoryItem[] = [
-    item('i1', 'Зерно эспрессо', 'Кофе', 'кг', 6, 9, 3, 7),
-    item('i2', 'Зерно фильтр', 'Кофе', 'кг', 3, 4, 2, 3),
-    item('i3', 'Молоко', 'Молочное', 'л', 40, 55, 28, 44),
-    item('i4', 'Растительное молоко', 'Молочное', 'л', 12, 15, 6, 13),
-    item('i5', 'Стаканы 250 мл', 'Расходники', 'шт', 300, 420, 150, 380),
-    item('i6', 'Крышки', 'Расходники', 'шт', 300, 380, 140, 400),
-    item('i7', 'Средство для чистки гидравлики', 'Химия', 'уп', 2, 3, 1, 2),
-    item('i8', 'Фильтры V60', 'Расходники', 'уп', 2, 3, 2, 1),
+    item('i1', 'Зерно эспрессо', 'Кофе', 'g', 6, 12, 5, 9),
+    item('i2', 'Зерно фильтр', 'Кофе', 'g', 3, 5, 3, 4),
+    item('i3', 'Молоко', 'Молочное', 'ml', 40, 70, 40, 60),
+    item('i4', 'Растительное молоко', 'Молочное', 'ml', 12, 20, 9, 16),
+    item('i5', 'Стаканы 250 мл', 'Расходники', 'pcs', 300, 600, 250, 520),
+    item('i6', 'Крышки', 'Расходники', 'pcs', 300, 560, 240, 540),
+    item('i7', 'Средство для чистки гидравлики', 'Химия', 'pcs', 2, 3, 1, 2),
+    item('i8', 'Фильтры V60', 'Расходники', 'pcs', 2, 3, 2, 1),
+  ];
+  // Позиция, которая есть не на всех точках (пример исключения)
+  inventory.push({ id: 'i9', name: 'Сироп ванильный', category: 'Бакалея', unit: 'ml', par: 1000, allLocations: false, locationIds: ['l1', 'l3'], opening: { l1: 3000, l3: 2000 } });
+
+  const receipts: Receipt[] = [
+    { id: 'rp1', locationId: 'l2', itemId: 'i1', qty: 3000, date: iso(2) },
+    { id: 'rp2', locationId: 'l2', itemId: 'i3', qty: 24000, date: iso(2) },
   ];
 
   const writeOffs: WriteOff[] = [
-    { id: 'w1', locationId: 'l1', itemId: 'i3', qty: 2, reason: 'Срок годности', date: iso(1) },
-    { id: 'w2', locationId: 'l2', itemId: 'i1', qty: 0.5, reason: 'Брак напитка', date: iso(3) },
-    { id: 'w3', locationId: 'l3', itemId: 'i5', qty: 20, reason: 'Пролив или ошибка', date: iso(2) },
+    { id: 'w1', locationId: 'l1', itemId: 'i3', qty: 2000, reason: 'Порча', date: iso(1) },
+    { id: 'w2', locationId: 'l2', itemId: 'i1', qty: 250, reason: 'Настройка помола', date: iso(3) },
+    { id: 'w3', locationId: 'l3', itemId: 'i5', qty: 20, reason: 'Тренировка бариста', date: iso(2) },
+  ];
+
+  const daySales: DaySales[] = [
+    { id: 'ds1', locationId: 'l1', date: iso(1), lines: [{ recipeId: 'rc1', count: 40 }, { recipeId: 'rc2', count: 55 }, { recipeId: 'rc3', count: 12 }] },
+    { id: 'ds2', locationId: 'l2', date: iso(1), lines: [{ recipeId: 'rc1', count: 25 }, { recipeId: 'rc2', count: 38 }, { recipeId: 'rc3', count: 9 }] },
   ];
 
   // Недельные показатели: пять последних недель по каждой точке, детерминированно.
@@ -172,7 +187,7 @@ export function makeSeed(): AppState {
   const complaints: Complaint[] = [{ id: 'cm1', locationId: 'l2', date: iso(1), text: 'Долгое ожидание в утренний пик', resolved: false }];
 
   return {
-    version: 3,
+    version: 4,
     settings: {
       networkName: 'Моя сеть',
       currency: '₽',
@@ -190,7 +205,9 @@ export function makeSeed(): AppState {
     recipes,
     attestations,
     inventory,
+    receipts,
     writeOffs,
+    daySales,
     metrics,
     equipment,
     repairs,

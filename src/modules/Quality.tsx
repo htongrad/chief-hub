@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { dialIssues, inScope, locName, todayISO, uid, useStore } from '../store';
+import { dialIssues, inScope, linkIngredients, locName, todayISO, uid, useStore } from '../store';
 
 const today = todayISO;
 
-type IngredientDraft = { name: string; amount: string; unit: string };
+type IngredientDraft = { name: string; amount: string; unit: string; itemId?: string };
 const emptyRecipe = { id: null as string | null, name: '', ingredients: [] as IngredientDraft[], method: '', guest: '' };
 
 export default function Quality() {
@@ -30,12 +30,17 @@ export default function Quality() {
       name: rc.name.trim(),
       ingredients: rc.ingredients
         .filter((i) => i.name.trim())
-        .map((i) => ({ name: i.name.trim(), amount: i.amount.trim(), unit: i.unit.trim() })),
+        .map((i) => ({ name: i.name.trim(), amount: i.amount.trim(), unit: i.unit.trim(), itemId: i.itemId })),
       method: rc.method.trim(),
       guestDescription: rc.guest.trim(),
       updated: today(),
     };
-    update((s) => ({ ...s, recipes: rc.id ? s.recipes.map((x) => (x.id === rc.id ? { ...x, ...row } : x)) : [...s.recipes, { id: uid(), ...row }] }));
+    // Ингредиенты сразу попадают в банк ингредиентов (Склад)
+    update((s) => {
+      const recipes = rc.id ? s.recipes.map((x) => (x.id === rc.id ? { ...x, ...row } : x)) : [...s.recipes, { id: uid(), ...row }];
+      const linked = linkIngredients(s.inventory, recipes);
+      return { ...s, recipes: linked.recipes, inventory: linked.inventory };
+    });
     setRc(emptyRecipe);
   };
 
@@ -180,7 +185,7 @@ export default function Quality() {
                 <b>{r.name}</b> <span className="small muted">· обновлено {r.updated}</span>
                 {r.ingredients.length > 0 && (
                   <ul className="small" style={{ margin: '6px 0', paddingLeft: 18 }}>
-                    {r.ingredients.map((i, k) => <li key={k}>{i.name} — {i.amount} {i.unit}</li>)}
+                    {r.ingredients.map((i, k) => <li key={k}>{i.name} — {i.amount} {i.unit}{!i.itemId && <span className="muted small"> · не в стоке</span>}</li>)}
                   </ul>
                 )}
                 {r.method && <div className="small"><b>Приготовление:</b> {r.method}</div>}
@@ -201,13 +206,16 @@ export default function Quality() {
           <div className="small muted" style={{ marginBottom: 4 }}>Ингредиенты</div>
           {rc.ingredients.map((i, idx) => (
             <div className="row" key={idx} style={{ marginTop: 6 }}>
-              <input style={{ flex: 1 }} placeholder="Ингредиент" value={i.name} onChange={(e) => setIng(idx, { name: e.target.value })} />
+              <input style={{ flex: 1 }} list="bank-items" placeholder="Ингредиент" value={i.name} onChange={(e) => setIng(idx, { name: e.target.value, itemId: undefined })} />
               <input style={{ width: 70 }} placeholder="Кол-во" value={i.amount} onChange={(e) => setIng(idx, { amount: e.target.value })} />
-              <input style={{ width: 70 }} placeholder="Ед." value={i.unit} onChange={(e) => setIng(idx, { unit: e.target.value })} />
+              <input style={{ width: 70 }} list="bank-units" placeholder="Ед." value={i.unit} onChange={(e) => setIng(idx, { unit: e.target.value })} />
               <button className="btn danger sm" onClick={() => delIng(idx)}>×</button>
             </div>
           ))}
           <button className="btn ghost sm" style={{ marginTop: 6 }} onClick={addIng}>+ Ингредиент</button>
+          <datalist id="bank-items">{state.inventory.map((i) => <option key={i.id} value={i.name} />)}</datalist>
+          <datalist id="bank-units">{['г', 'кг', 'мл', 'л', 'шт'].map((u) => <option key={u} value={u} />)}</datalist>
+          <p className="small muted" style={{ marginTop: 6 }}>Ингредиенты в г, кг, мл, л и шт попадают в банк ингредиентов на Складе и списываются по продажам.</p>
         </div>
         <div className="form" style={{ marginTop: 12 }}>
           <div className="f" style={{ flex: 1, minWidth: 220 }}>Способ приготовления<textarea rows={3} style={{ width: '100%' }} value={rc.method} onChange={(e) => setRc({ ...rc, method: e.target.value })} placeholder="Пошагово: доза, время, температура, подача" /></div>

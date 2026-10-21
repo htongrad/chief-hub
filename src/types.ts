@@ -52,6 +52,8 @@ export interface RecipeIngredient {
   name: string;
   amount: string;
   unit: string;
+  /** Позиция банка ингредиентов (склад). Проставляется автоматически при сохранении стандарта. */
+  itemId?: string;
 }
 
 /** Стандарт напитка (ТТК): состав, приготовление и описание для гостя. */
@@ -73,18 +75,38 @@ export interface Attestation {
   note: string;
 }
 
+/** Базовая единица учёта: граммы, миллилитры или штуки. Показывается в кг, л и шт. */
+export type BaseUnit = 'g' | 'ml' | 'pcs';
+
+/**
+ * Позиция банка ингредиентов. Все количества хранятся в базовых единицах (г, мл, шт).
+ * Остаток на точке = стартовый остаток + приходы − списания − расход по стандартам (по продажам).
+ */
 export interface InventoryItem {
   id: string;
   name: string;
   category: string;
-  unit: string;
-  /** Минимальный остаток на одну точку */
+  unit: BaseUnit;
+  /** Минимальный остаток на одну точку (в базовых единицах): ниже него позиция попадает в закупку */
   par: number;
-  /** Остатки: id точки -> количество */
-  qty: Record<string, number>;
+  /** Позиция есть на всех точках (в том числе на новых) */
+  allLocations: boolean;
+  /** Точки, где позиция есть, если allLocations = false */
+  locationIds: string[];
+  /** Стартовый остаток (по пересчёту): id точки -> количество */
+  opening: Record<string, number>;
 }
 
-/** Списание: уменьшает остаток позиции на точке. */
+/** Приход: поставка позиции на точку. */
+export interface Receipt {
+  id: string;
+  locationId: string;
+  itemId: string;
+  qty: number; // в базовых единицах
+  date: string;
+}
+
+/** Списание: уменьшает остаток позиции на точке. Количество в базовых единицах. */
 export interface WriteOff {
   id: string;
   locationId: string;
@@ -92,6 +114,14 @@ export interface WriteOff {
   qty: number;
   reason: string;
   date: string;
+}
+
+/** Продажи за день по данным кассы: сколько чего продано. По стандартам считается расход ингредиентов. */
+export interface DaySales {
+  id: string;
+  locationId: string;
+  date: string;
+  lines: { recipeId: string; count: number }[];
 }
 
 export interface MetricEntry {
@@ -166,7 +196,7 @@ export interface Settings {
 }
 
 export interface AppState {
-  version: 3;
+  version: 4;
   settings: Settings;
   locations: Location[];
   staff: Staff[];
@@ -175,7 +205,9 @@ export interface AppState {
   recipes: Recipe[];
   attestations: Attestation[];
   inventory: InventoryItem[];
+  receipts: Receipt[];
   writeOffs: WriteOff[];
+  daySales: DaySales[];
   metrics: MetricEntry[];
   equipment: Equipment[];
   repairs: Repair[];
