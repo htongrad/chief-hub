@@ -11,6 +11,7 @@ import { EQUIPMENT_KIND, ROLE_LABEL, SKILLS, SKILL_LEVELS } from './config';
 import {
   attestStatus,
   attestSummary,
+  avgPrice,
   buildReport,
   buildSignals,
   countDiffPct,
@@ -23,6 +24,7 @@ import {
   lastWeek,
   locName,
   overdueEquipmentCount,
+  receiptUnitPrice,
   serviceScore,
   stability,
   stockOf,
@@ -159,18 +161,20 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
   // Склад: сток по точкам (кг, л, шт), ниже минимального остатка подсвечено
   sheets.push({
     name: 'Остатки',
-    header: ['Позиция', 'Категория', 'Ед. стока', 'Минимальный остаток', 'Где есть', ...state.locations.map((l) => l.name)],
-    rows: state.inventory.map((it) =>
-      row(
+    header: ['Позиция', 'Категория', 'Ед. стока', 'Минимальный остаток', 'Где есть', ...state.locations.map((l) => l.name), `Средняя цена с НДС, ${cur} за ед. стока`],
+    rows: state.inventory.map((it) => {
+      const p = avgPrice(state, it);
+      return row(
         it.name,
         it.category,
         fmtStock(it.unit, 0).split(' ')[1],
         fmtStock(it.unit, it.par).split(' ')[0],
         it.allLocations ? 'Все точки' : it.locationIds.map(ln).join(', '),
-        ...state.locations.map((l) => (itemAt(it, l.id) ? fmtStock(it.unit, stockOf(state, it, l.id)).split(' ')[0] : '—'))
-      )
-    ),
-    marks: state.inventory.map((it) => mk('', '', '', '', '', ...state.locations.map((l) => (!itemAt(it, l.id) ? '' : stockOf(state, it, l.id) < it.par ? 'bad' : 'ok') as Mark))),
+        ...state.locations.map((l) => (itemAt(it, l.id) ? fmtStock(it.unit, stockOf(state, it, l.id)).split(' ')[0] : '—')),
+        p ? Math.round(p.perUnit * 100) / 100 : '—'
+      );
+    }),
+    marks: state.inventory.map((it) => mk('', '', '', '', '', ...state.locations.map((l) => (!itemAt(it, l.id) ? '' : stockOf(state, it, l.id) < it.par ? 'bad' : 'ok') as Mark), '')),
     widths: [200, 140, 80, 120, 160],
   });
 
@@ -189,12 +193,13 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
 
   sheets.push({
     name: 'Приходы',
-    header: ['Дата', 'Точка', 'Позиция', 'Количество'],
+    header: ['Дата', 'Точка', 'Позиция', 'Количество', `Сумма по накладной с НДС, ${cur}`, `Цена с НДС, ${cur} за ед. стока`],
     rows: [...state.receipts].sort(byDateDesc).map((x) => {
       const it = state.inventory.find((i) => i.id === x.itemId);
-      return row(x.date, ln(x.locationId), it?.name ?? '—', it ? fmtStock(it.unit, x.qty) : x.qty);
+      const price = it ? receiptUnitPrice(it, x) : null;
+      return row(x.date, ln(x.locationId), it?.name ?? '—', it ? fmtStock(it.unit, x.qty) : x.qty, x.sum ?? '—', price === null ? '—' : Math.round(price * 100) / 100);
     }),
-    widths: [100, 140, 200, 100],
+    widths: [100, 140, 200, 100, 170, 170],
   });
 
   sheets.push({

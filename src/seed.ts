@@ -125,8 +125,8 @@ export function makeSeed(): AppState {
   inventory.push({ id: 'i9', name: 'Сироп ванильный', category: 'Бакалея', unit: 'ml', par: 1000, allLocations: false, locationIds: ['l1', 'l3'], opening: { l1: 3000, l3: 2000 } });
 
   const receipts: Receipt[] = [
-    { id: 'rp1', locationId: 'l2', itemId: 'i1', qty: 3000, date: iso(2) },
-    { id: 'rp2', locationId: 'l2', itemId: 'i3', qty: 24000, date: iso(2) },
+    { id: 'rp1', locationId: 'l2', itemId: 'i1', qty: 3000, date: iso(2), sum: 6900 },
+    { id: 'rp2', locationId: 'l2', itemId: 'i3', qty: 24000, date: iso(2), sum: 2160 },
   ];
 
   // Пересчёт на прошлой неделе: молоко на второй точке разошлось с расчётом

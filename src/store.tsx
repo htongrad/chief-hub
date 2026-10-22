@@ -104,6 +104,33 @@ export function stockOf(state: AppState, it: InventoryItem, locationId: string):
   return (it.opening[locationId] ?? 0) + inn - out - usageOf(state, it.id, locationId);
 }
 
+/** Цена за кг, л или шт с НДС (как в накладной): сумма прихода / количество в единицах стока. null — цены нет. */
+export function receiptUnitPrice(it: InventoryItem, r: { qty: number; sum?: number }): number | null {
+  if (!r.sum || r.sum <= 0 || r.qty <= 0) return null;
+  return r.sum / (r.qty / STOCK_FACTOR[it.unit]);
+}
+
+/**
+ * Средняя цена позиции за кг, л или шт с НДС по всем приходам с ценой на всех точках:
+ * сумма всех накладных / общее количество, поэтому дорогая и дешёвая поставки не дают скачков.
+ * Приходы без суммы не учитываются. null — ни одного прихода с ценой.
+ */
+export function avgPrice(state: AppState, it: InventoryItem): { perUnit: number; count: number } | null {
+  let sum = 0;
+  let qty = 0;
+  let count = 0;
+  state.receipts.forEach((r) => {
+    if (r.itemId !== it.id || !r.sum || r.sum <= 0 || r.qty <= 0) return;
+    sum += r.sum;
+    qty += r.qty;
+    count++;
+  });
+  return count ? { perUnit: sum / (qty / STOCK_FACTOR[it.unit]), count } : null;
+}
+
+/** Денежная сумма для экрана: крупные суммы без копеек, мелкие (цена за штуку) с копейками. */
+export const fmtMoney = (n: number) => (n >= 100 ? fmt(n) : (Math.round(n * 100) / 100).toLocaleString('ru-RU'));
+
 /** Расхождение факта и расчёта в процентах от большей из величин. */
 export const countDiffPct = (expected: number, actual: number) => {
   const m = Math.max(Math.abs(expected), Math.abs(actual));

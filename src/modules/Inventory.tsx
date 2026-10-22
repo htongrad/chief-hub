@@ -7,11 +7,14 @@ import {
   problemItems,
   STOCK_FACTOR,
   STOCK_LABEL,
+  avgPrice,
   daysBetween,
+  fmtMoney,
   fmtQty,
   inScope,
   itemAt,
   locName,
+  receiptUnitPrice,
   reorderList,
   stockOf,
   todayISO,
@@ -125,14 +128,32 @@ export default function Inventory() {
     }));
 
   // ——— Приход ———
-  const [rc, setRc] = useState({ locationId: defLoc, itemId: '', qty: 1, unit: 'кг', date: today });
+  const cur = state.settings.currency;
+  /** Сумма из поля ввода: пусто или неверно = цены нет. */
+  const parseSum = (s: string) => {
+    const n = parseFloat(s.replace(/\s/g, '').replace(',', '.'));
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+  const [rc, setRc] = useState({ locationId: defLoc, itemId: '', qty: 1, unit: 'кг', date: today, sum: '' });
   const rcUnit = RECEIPT_UNITS.find((u) => u.label === rc.unit) ?? RECEIPT_UNITS[0];
   const rcItems = state.inventory.filter((i) => i.unit === rcUnit.base && itemAt(i, rc.locationId));
   const rcItem = rcItems.find((i) => i.id === rc.itemId) ?? rcItems[0];
+  const rcSum = parseSum(rc.sum);
+  const rcPrice = rcItem && rcSum ? receiptUnitPrice(rcItem, { qty: rc.qty * rcUnit.factor, sum: rcSum }) : null;
   const addReceipt = () => {
     if (!rcItem || !rc.locationId || !(rc.qty > 0)) return;
-    update((s) => ({ ...s, receipts: [{ id: uid(), locationId: rc.locationId, itemId: rcItem.id, qty: rc.qty * rcUnit.factor, date: rc.date || todayISO() }, ...s.receipts] }));
-    setRc({ ...rc, qty: 1 });
+    update((s) => ({
+      ...s,
+      receipts: [{ id: uid(), locationId: rc.locationId, itemId: rcItem.id, qty: rc.qty * rcUnit.factor, date: rc.date || todayISO(), ...(rcSum ? { sum: rcSum } : {}) }, ...s.receipts],
+    }));
+    setRc({ ...rc, qty: 1, sum: '' });
+  };
+  /** Дописать, исправить или убрать сумму по накладной у уже записанного прихода. */
+  const editSum = (id: string, current?: number) => {
+    const raw = prompt(`Сумма по накладной с НДС за весь объём, ${cur}. Пусто — убрать цену.`, current ? String(current) : '');
+    if (raw === null) return;
+    const sum = parseSum(raw);
+    update((s) => ({ ...s, receipts: s.receipts.map((x) => (x.id === id ? { ...x, sum } : x)) }));
   };
 
   // ——— Списание ———
@@ -242,6 +263,7 @@ export default function Inventory() {
                     <tr>
                       <th>Позиция</th>
                       {locs.map((l) => <th key={l.id} className="num">{l.name}</th>)}
+                      <th className="num" title="Средняя цена за кг, л или шт с НДС по приходам с суммой">Цена, {cur}</th>
                       <th className="num">Минимальный остаток</th>
                       <th>Где есть</th>
                       <th />
@@ -261,6 +283,12 @@ export default function Inventory() {
                             </td>
                           );
                         })}
+                        <td className="num">
+                          {(() => {
+                            const p = avgPrice(state, i);
+                            return p ? <span title={`Средняя по приходам с суммой: ${p.count}`}>{fmtMoney(p.perUnit)}</span> : <span className="muted">—</span>;
+                          })()}
+                        </td>
                         <td className="num"><NumField value={i.par / STOCK_FACTOR[i.unit]} onCommit={(v) => setPar(i.id, v)} label={`Минимальный остаток: ${i.name}`} /></td>
                         <td><LocationChecks all={i.allLocations} ids={i.locationIds} onAll={(v) => setAll(i.id, v)} onToggle={(id) => toggleLoc(i.id, id)} /></td>
                         <td><button className="btn danger sm" onClick={() => remove(i.id)} aria-label={`Удалить ${i.name}`}>×</button></td>
@@ -420,9 +448,14 @@ export default function Inventory() {
                 </select>
               </div>
               <div className="f">Количество<input type="number" min={0} step="any" value={rc.qty} onChange={(e) => setRc({ ...rc, qty: +e.target.value })} /></div>
+              <div className="f">Сумма по накладной, {cur}<input inputMode="decimal" placeholder="с НДС" value={rc.sum} onChange={(e) => setRc({ ...rc, sum: e.target.value })} style={{ width: 130 }} /></div>
               <div className="f">Дата<input type="date" value={rc.date} onChange={(e) => setRc({ ...rc, date: e.target.value })} /></div>
               <button className="btn" onClick={addReceipt} disabled={!rcItem}>Записать приход</button>
             </div>
+            <p className="muted small" style={{ marginTop: 8 }}>
+              Сумма за весь привезённый объём, как в накладной, с НДС. Можно оставить пустой: такой приход не попадёт в среднюю цену.
+              {rcPrice !== null && <b> Цена: {fmtMoney(rcPrice)} {cur} за {rc.unit}.</b>}
+            </p>
           </div>
           <div className="card flat">
             <div style={{ padding: '14px 16px 0' }}><h2>Приходы за 30 дней</h2></div>
@@ -432,13 +465,20 @@ export default function Inventory() {
                   {recentIn.length === 0 && <tr><td><div className="empty">Приходов нет.</div></td></tr>}
                   {recentIn.slice(0, 10).map((o) => {
                     const it = itemOf(o.itemId);
+                    const price = it ? receiptUnitPrice(it, o) : null;
                     return (
                       <tr key={o.id}>
                         <td>
                           <b>{it?.name ?? 'Удалённая позиция'}</b>
                           <div className="small muted">{locName(state, o.locationId)} · {o.date}</div>
                         </td>
-                        <td className="num">{it ? stockText(it, o.qty) : o.qty}</td>
+                        <td className="num">
+                          {it ? stockText(it, o.qty) : o.qty}
+                          <div className="small muted">
+                            {o.sum ? `${fmtMoney(o.sum)} ${cur}${it && price !== null ? ` · ${fmtMoney(price)} ${cur}/${STOCK_LABEL[it.unit]}` : ''}` : 'без цены'}{' '}
+                            <button className="btn ghost sm" onClick={() => editSum(o.id, o.sum)}>{o.sum ? 'Изм.' : 'Цена'}</button>
+                          </div>
+                        </td>
                         <td><button className="btn danger sm" onClick={() => confirm('Удалить приход? Остаток уменьшится.') && update((s) => ({ ...s, receipts: s.receipts.filter((x) => x.id !== o.id) }))} aria-label="Удалить запись">×</button></td>
                       </tr>
                     );
