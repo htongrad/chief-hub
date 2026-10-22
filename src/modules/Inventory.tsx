@@ -14,6 +14,7 @@ import {
   inScope,
   itemAt,
   locName,
+  makeWriteOffs,
   receiptUnitPrice,
   reorderList,
   stockOf,
@@ -157,13 +158,27 @@ export default function Inventory() {
   };
 
   // ——— Списание ———
-  const [w, setW] = useState({ locationId: defLoc, itemId: '', qty: 1, unit: 'g' as BaseUnit, reason: WRITE_OFF_REASONS[0] });
-  const wItems = state.inventory.filter((i) => i.unit === w.unit && itemAt(i, w.locationId));
-  const wItem = wItems.find((i) => i.id === w.itemId) ?? wItems[0];
+  // Точка и причина общие на всё списание, позиций можно добавить несколько: каждая станет отдельной записью.
+  type OffLine = { key: string; unit: BaseUnit; itemId: string; qty: string };
+  const newOffLine = (unit: BaseUnit = 'g'): OffLine => ({ key: uid(), unit, itemId: '', qty: '' });
+  const [w, setW] = useState({ locationId: defLoc, reason: WRITE_OFF_REASONS[0] });
+  const [wLines, setWLines] = useState<OffLine[]>(() => [newOffLine()]);
+  const [wMsg, setWMsg] = useState('');
+  const patchOffLine = (key: string, patch: Partial<OffLine>) => {
+    setWLines((ls) => ls.map((x) => (x.key === key ? { ...x, ...patch } : x)));
+    setWMsg('');
+  };
+  /** Строки формы с подобранной позицией: по умолчанию первая в списке для выбранных точки и единицы. */
+  const wRows = wLines.map((l) => {
+    const items = state.inventory.filter((i) => i.unit === l.unit && itemAt(i, w.locationId));
+    return { l, items, item: items.find((i) => i.id === l.itemId) ?? items[0] };
+  });
+  const wDraft = makeWriteOffs(state, w.locationId, w.reason, todayISO(), wLines);
   const writeOff = () => {
-    if (!wItem || !w.locationId || !(w.qty > 0)) return;
-    update((s) => ({ ...s, writeOffs: [{ id: uid(), locationId: w.locationId, itemId: wItem.id, qty: w.qty, reason: w.reason, date: todayISO() }, ...s.writeOffs] }));
-    setW({ ...w, qty: 1 });
+    if (!w.locationId || wDraft.length === 0) return;
+    update((s) => ({ ...s, writeOffs: [...wDraft, ...s.writeOffs] }));
+    setWLines([newOffLine(wLines[wLines.length - 1]?.unit)]);
+    setWMsg(`Списано позиций: ${wDraft.length}.`);
   };
 
   // ——— Расход за день (продажи из кассы) ———
@@ -494,32 +509,47 @@ export default function Inventory() {
         <div className="grid two">
           <div className="card">
             <h2>Новое списание</h2>
-            <p className="muted small" style={{ marginBottom: 10 }}>Остаток позиции на выбранной точке уменьшится на списанное количество. Списание идёт в г, мл или шт, остаток показывается в кг, л и шт.</p>
+            <p className="muted small" style={{ marginBottom: 10 }}>Остаток позиции на выбранной точке уменьшится на списанное количество. Списание идёт в г, мл или шт, остаток показывается в кг, л и шт. Позиций можно добавить несколько: точка и причина у них общие.</p>
             <div className="form">
               <div className="f">Точка
-                <select value={w.locationId} onChange={(e) => setW({ ...w, locationId: e.target.value })}>
+                <select value={w.locationId} onChange={(e) => { setW({ ...w, locationId: e.target.value }); setWMsg(''); }}>
                   {state.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
               </div>
-              <div className="f">Единица
-                <select value={w.unit} onChange={(e) => setW({ ...w, unit: e.target.value as BaseUnit })}>
-                  {UNIT_OPTIONS.map((u) => <option key={u} value={u}>{BASE_LABEL[u]}</option>)}
-                </select>
-              </div>
-              <div className="f">Позиция
-                <select value={wItem?.id ?? ''} onChange={(e) => setW({ ...w, itemId: e.target.value })}>
-                  {wItems.length === 0 && <option value="">Нет позиций в этих единицах</option>}
-                  {wItems.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-                </select>
-              </div>
-              <div className="f">Количество, {BASE_LABEL[w.unit]}<input type="number" min={0} step="any" value={w.qty} onChange={(e) => setW({ ...w, qty: +e.target.value })} /></div>
               <div className="f">Причина
                 <select value={w.reason} onChange={(e) => setW({ ...w, reason: e.target.value })}>
                   {WRITE_OFF_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
               </div>
-              <button className="btn" onClick={writeOff} disabled={!wItem}>Списать</button>
             </div>
+            <div className="stack" style={{ gap: 10, margin: '12px 0' }}>
+              {wRows.map(({ l, items, item }, idx) => (
+                <div className="form" key={l.key}>
+                  <div className="f">Единица
+                    <select value={l.unit} onChange={(e) => patchOffLine(l.key, { unit: e.target.value as BaseUnit, itemId: '' })}>
+                      {UNIT_OPTIONS.map((u) => <option key={u} value={u}>{BASE_LABEL[u]}</option>)}
+                    </select>
+                  </div>
+                  <div className="f">Позиция{wRows.length > 1 ? ` ${idx + 1}` : ''}
+                    <select value={item?.id ?? ''} onChange={(e) => patchOffLine(l.key, { itemId: e.target.value })}>
+                      {items.length === 0 && <option value="">Нет позиций в этих единицах</option>}
+                      {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="f">Количество, {BASE_LABEL[l.unit]}<input inputMode="decimal" value={l.qty} onChange={(e) => patchOffLine(l.key, { qty: e.target.value })} style={{ width: 110 }} /></div>
+                  {wRows.length > 1 && (
+                    <button className="btn danger sm" aria-label="Убрать позицию" onClick={() => { setWLines((ls) => ls.filter((x) => x.key !== l.key)); setWMsg(''); }}>×</button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="row">
+              <button className="btn ghost" onClick={() => { setWLines((ls) => [...ls, newOffLine(ls[ls.length - 1]?.unit)]); setWMsg(''); }}>+ Ещё позиция</button>
+              <button className="btn" onClick={writeOff} disabled={wDraft.length === 0}>Списать{wDraft.length > 1 ? ` (${wDraft.length})` : ''}</button>
+            </div>
+            <p className="small muted" style={{ marginTop: 8 }}>
+              {wMsg || (wRows.length > wDraft.length && wDraft.length > 0 ? 'Строки без количества будут пропущены.' : '')}
+            </p>
           </div>
           <div className="card flat">
             <div style={{ padding: '14px 16px 0' }}><h2>Списания за 30 дней</h2></div>

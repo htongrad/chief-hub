@@ -105,6 +105,28 @@ export function stockOf(state: AppState, it: InventoryItem, locationId: string):
   return (it.opening[locationId] ?? 0) + inn - out - usageOf(state, it.id, locationId);
 }
 
+/**
+ * Записи списания из строк формы: каждая позиция становится отдельной записью с общей точкой, причиной и датой.
+ * Строки без количества и строки, для которых нет позиции на этой точке в выбранных единицах, пропускаются.
+ * Если позиция в строке не выбрана, берётся первая подходящая.
+ */
+export function makeWriteOffs(
+  state: AppState,
+  locationId: string,
+  reason: string,
+  date: string,
+  lines: { unit: BaseUnit; itemId: string; qty: string }[]
+): WriteOff[] {
+  const out: WriteOff[] = [];
+  lines.forEach((l) => {
+    const items = state.inventory.filter((i) => i.unit === l.unit && itemAt(i, locationId));
+    const item = items.find((i) => i.id === l.itemId) ?? items[0];
+    const qty = parseFloat(l.qty.replace(/\s/g, '').replace(',', '.'));
+    if (item && Number.isFinite(qty) && qty > 0) out.push({ id: uid(), locationId, itemId: item.id, qty, reason, date });
+  });
+  return out;
+}
+
 /** Цена за кг, л или шт с НДС (как в накладной): сумма прихода / количество в единицах стока. null — цены нет. */
 export function receiptUnitPrice(it: InventoryItem, r: { qty: number; sum?: number }): number | null {
   if (!r.sum || r.sum <= 0 || r.qty <= 0) return null;
