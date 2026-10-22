@@ -7,7 +7,7 @@
  * Поэтому при изменении панели скрипт обновлять не нужно — меняется только этот файл.
  */
 import { useEffect, useRef, useState } from 'react';
-import { EQUIPMENT_KIND, ROLE_LABEL, SKILLS, SKILL_LEVELS } from './config';
+import { AUDIT_ITEM_TEXT, EQUIPMENT_KIND, ROLE_LABEL, SKILLS, SKILL_LEVELS } from './config';
 import {
   attestStatus,
   attestSummary,
@@ -398,20 +398,20 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
     const list = [...state.visits].sort(byDateDesc);
     sheets.push({
       name: 'Обходы',
-      header: ['Дата', 'Точка', 'Тип', 'Балл, %', 'Заметка'],
-      rows: list.map((v) => row(v.date, ln(v.locationId), v.kind === 'round' ? 'обход' : 'тайный гость', v.score, v.note)),
-      marks: list.map((v) => mk('', '', '', v.score >= settings.visitMinScore ? 'ok' : v.score >= settings.visitMinScore - 10 ? 'warn' : 'bad', '')),
-      widths: [100, 140, 120, 80, 360],
+      header: ['Дата', 'Точка', 'Тип', 'Балл, %', 'Заметка', 'Слабые пункты'],
+      rows: list.map((v) => row(v.date, ln(v.locationId), v.kind === 'round' ? 'обход' : 'тайный гость', v.score, v.note, Object.keys(v.answers ?? {}).filter((id) => v.answers?.[id] === 0 && AUDIT_ITEM_TEXT[id]).map((id) => AUDIT_ITEM_TEXT[id]).join('; '))),
+      marks: list.map((v) => mk('', '', '', v.score >= settings.visitMinScore ? 'ok' : v.score >= settings.visitMinScore - 10 ? 'warn' : 'bad', '', '')),
+      widths: [100, 140, 120, 80, 300, 360],
     });
   }
 
   {
     const list = [...state.complaints].sort(byDateDesc);
     sheets.push({
-      name: 'Жалобы',
+      name: 'Отзывы гостей',
       header: ['Дата', 'Точка', 'Текст', 'Статус'],
-      rows: list.map((c) => row(c.date, ln(c.locationId), c.text, c.resolved ? 'решена' : 'открыта')),
-      marks: list.map((c) => mk('', '', '', c.resolved ? 'ok' : 'warn')),
+      rows: list.map((c) => row(c.date, ln(c.locationId), c.text, c.kind === 'praise' ? 'похвала' : c.resolved ? 'решена' : 'открыта')),
+      marks: list.map((c) => mk('', '', '', c.kind === 'praise' || c.resolved ? 'ok' : 'warn')),
       widths: [100, 140, 400, 100],
     });
   }

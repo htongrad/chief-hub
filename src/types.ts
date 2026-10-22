@@ -188,14 +188,18 @@ export interface Visit {
   kind: 'round' | 'mystery';
   score: number; // 0..100
   note: string;
+  /** Оценки пунктов бланка: 2 да, 1 частично, 0 нет. Нет у старых записей (там только общий балл). */
+  answers?: Record<string, 0 | 1 | 2>;
 }
 
+/** Отзыв гостя: жалоба или похвала. У старых записей kind нет, это жалоба. */
 export interface Complaint {
   id: string;
   locationId: string;
   date: string;
   text: string;
-  resolved: boolean;
+  resolved: boolean; // для похвалы не используется
+  kind?: 'complaint' | 'praise';
 }
 
 export interface EspressoTarget {

@@ -898,6 +898,13 @@ export function overdueEquipmentCount(state: AppState, scope: string): number {
   return state.equipment.filter((e) => inScope(e.locationId, scope) && equipmentDue(e).state === 'overdue').length;
 }
 
+/** Балл бланка в процентах: сумма оценок / максимум по оценённым пунктам. Пропущенные пункты не считаются. */
+export function auditScore(answers: Record<string, 0 | 1 | 2>): { score: number | null; answered: number } {
+  const vals = Object.values(answers);
+  if (!vals.length) return { score: null, answered: 0 };
+  return { score: Math.round((vals.reduce<number>((a, v) => a + v, 0) / (vals.length * 2)) * 100), answered: vals.length };
+}
+
 /** Средний балл обходов и тайного гостя за последние days дней. */
 export function serviceScore(state: AppState, scope: string, days: number): number | null {
   const today = todayISO();
@@ -983,7 +990,7 @@ export function buildSignals(state: AppState, scope: string): Signal[] {
     if (last && last.score < settings.visitMinScore) out.push({ level: 'warn', title: `Обход · ${l.name}: ${last.score}%`, detail: `ниже минимума ${settings.visitMinScore}% (${last.date})` });
   });
   state.complaints
-    .filter((c) => !c.resolved && inScope(c.locationId, scope))
+    .filter((c) => c.kind !== 'praise' && !c.resolved && inScope(c.locationId, scope))
     .forEach((c) => out.push({ level: 'warn', title: `Жалоба гостя · ${ln(c.locationId)}`, detail: c.text }));
 
   return [...out.filter((x) => x.level === 'bad'), ...out.filter((x) => x.level === 'warn')];
@@ -1081,7 +1088,9 @@ export function buildReport(state: AppState, scope: string): ReportData {
   const guest: string[] = [];
   guest.push(rounds.length ? `Обходов за 7 дней: ${rounds.length}, средний балл ${Math.round(rounds.reduce((a, v) => a + v.score, 0) / rounds.length)}%` : 'Обходов за 7 дней не было');
   if (mystery.length) guest.push(`Тайный гость за 30 дней: средний балл ${Math.round(mystery.reduce((a, v) => a + v.score, 0) / mystery.length)}%`);
-  guest.push(`Открытых жалоб гостей: ${state.complaints.filter((c) => !c.resolved && inScope(c.locationId, scope)).length}`);
+  guest.push(`Открытых жалоб гостей: ${state.complaints.filter((c) => c.kind !== 'praise' && !c.resolved && inScope(c.locationId, scope)).length}`);
+  const praise = state.complaints.filter((c) => c.kind === 'praise' && inScope(c.locationId, scope) && within(c.date, 30));
+  if (praise.length) guest.push(`Похвал от гостей за 30 дней: ${praise.length}`);
   sections.push({ title: 'Гость и точки', lines: guest });
 
   // Риски

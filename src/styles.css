@@ -112,6 +112,17 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .check.done span { color: var(--ink-2); text-decoration: line-through; }
 .stage { display: grid; gap: 8px; }
 
+.audit-item { display: grid; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.audit-item:last-child { border-bottom: 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; width: fit-content; }
+.seg button { all: unset; cursor: pointer; padding: 7px 14px; font-size: 14px; color: var(--ink-2); background: var(--surface); }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.seg button.on { color: #fff; font-weight: 600; }
+.seg button.on.v2 { background: var(--ok); }
+.seg button.on.v1 { background: var(--warn); }
+.seg button.on.v0 { background: var(--bad); }
+
 .alert { display: flex; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
 .alert.bad { border-left: 4px solid var(--bad); }
 .alert.warn { border-left: 4px solid var(--warn); }
