@@ -11,6 +11,7 @@ import { AUDIT_ITEM_TEXT, EQUIPMENT_KIND, ROLE_LABEL, SKILLS, SKILL_LEVELS } fro
 import {
   attestStatus,
   attestSummary,
+  auditIssues,
   avgPrice,
   buildReport,
   buildSignals,
@@ -398,8 +399,8 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
     const list = [...state.visits].sort(byDateDesc);
     sheets.push({
       name: 'Обходы',
-      header: ['Дата', 'Точка', 'Тип', 'Балл, %', 'Заметка', 'Слабые пункты'],
-      rows: list.map((v) => row(v.date, ln(v.locationId), v.kind === 'round' ? 'обход' : 'тайный гость', v.score, v.note, Object.keys(v.answers ?? {}).filter((id) => v.answers?.[id] === 0 && AUDIT_ITEM_TEXT[id]).map((id) => AUDIT_ITEM_TEXT[id]).join('; '))),
+      header: ['Дата', 'Точка', 'Тип', 'Балл, %', 'Заметка', 'Слабые пункты и заметки'],
+      rows: list.map((v) => row(v.date, ln(v.locationId), v.kind === 'round' ? 'обход' : 'тайный гость', v.score, v.note, auditIssues(v.answers, v.itemNotes, AUDIT_ITEM_TEXT).join('; '))),
       marks: list.map((v) => mk('', '', '', v.score >= settings.visitMinScore ? 'ok' : v.score >= settings.visitMinScore - 10 ? 'warn' : 'bad', '', '')),
       widths: [100, 140, 120, 80, 300, 360],
     });

@@ -905,6 +905,15 @@ export function auditScore(answers: Record<string, 0 | 1 | 2>): { score: number 
   return { score: Math.round((vals.reduce<number>((a, v) => a + v, 0) / (vals.length * 2)) * 100), answered: vals.length };
 }
 
+/** Проблемные пункты бланка: все «нет» и «частично» с пояснением. Для журнала и копии на Диске. */
+export function auditIssues(answers: Record<string, 0 | 1 | 2> | undefined, notes: Record<string, string> | undefined, textOf: Record<string, string>): string[] {
+  if (!answers) return [];
+  return Object.keys(answers)
+    .filter((id) => textOf[id] && (answers[id] === 0 || (answers[id] === 1 && notes?.[id])))
+    .sort((a, b) => answers[a] - answers[b])
+    .map((id) => `${answers[id] === 0 ? 'Нет' : 'Частично'}: ${textOf[id]}${notes?.[id] ? ` (${notes[id]})` : ''}`);
+}
+
 /** Средний балл обходов и тайного гостя за последние days дней. */
 export function serviceScore(state: AppState, scope: string, days: number): number | null {
   const today = todayISO();
