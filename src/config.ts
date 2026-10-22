@@ -140,6 +140,12 @@ export const MYSTERY_CHECKS: AuditGroup[] = [
   },
 ];
 
+export const COMPLAINT_ACTIONS: { id: 'fixed' | 'discussed' | 'noaction'; label: string }[] = [
+  { id: 'fixed', label: 'Исправлено' },
+  { id: 'discussed', label: 'Разобрано с сотрудником' },
+  { id: 'noaction', label: 'Действий не требуется' },
+];
+
 export const AUDIT_ITEM_TEXT: Record<string, string> = Object.fromEntries(
   [...ROUND_CHECKS, ...MYSTERY_CHECKS].flatMap((g) => g.items.map((i) => [i.id, i.text])),
 );

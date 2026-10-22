@@ -7,7 +7,7 @@
  * Поэтому при изменении панели скрипт обновлять не нужно — меняется только этот файл.
  */
 import { useEffect, useRef, useState } from 'react';
-import { AUDIT_ITEM_TEXT, EQUIPMENT_KIND, ROLE_LABEL, SKILLS, SKILL_LEVELS } from './config';
+import { AUDIT_ITEM_TEXT, COMPLAINT_ACTIONS, EQUIPMENT_KIND, ROLE_LABEL, SKILLS, SKILL_LEVELS } from './config';
 import {
   attestStatus,
   attestSummary,
@@ -410,10 +410,10 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
     const list = [...state.complaints].sort(byDateDesc);
     sheets.push({
       name: 'Отзывы гостей',
-      header: ['Дата', 'Точка', 'Текст', 'Статус'],
-      rows: list.map((c) => row(c.date, ln(c.locationId), c.text, c.kind === 'praise' ? 'похвала' : c.resolved ? 'решена' : 'открыта')),
-      marks: list.map((c) => mk('', '', '', c.kind === 'praise' || c.resolved ? 'ok' : 'warn')),
-      widths: [100, 140, 400, 100],
+      header: ['Дата', 'Точка', 'Текст', 'Статус', 'Дата закрытия', 'Что сделали', 'Пояснение'],
+      rows: list.map((c) => row(c.date, ln(c.locationId), c.text, c.kind === 'praise' ? 'похвала' : c.resolved ? 'решена' : 'открыта', c.resolvedDate ?? '', COMPLAINT_ACTIONS.find((a) => a.id === c.action)?.label ?? '', c.resolution ?? '')),
+      marks: list.map((c) => mk('', '', '', c.kind === 'praise' || c.resolved ? 'ok' : 'warn', '', '', '')),
+      widths: [100, 140, 360, 100, 110, 180, 320],
     });
   }
 
