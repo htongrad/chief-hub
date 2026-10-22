@@ -40,7 +40,7 @@ export default function Overview() {
         </div>
         <div className="card kpi">
           <div className="label">Себестоимость</div>
-          <div className="value">{week ? `${now.cogs.toFixed(1)}%` : '—'}</div>
+          <div className="value">{now.count ? `${now.cogs.toFixed(1)}%` : '—'}</div>
           <div className="delta">цель {settings.cogsTargetPct}%, среднее по выбранным точкам</div>
         </div>
         <div className="card kpi">
@@ -55,12 +55,12 @@ export default function Overview() {
         </div>
         <div className="card kpi">
           <div className="label">Выручка за неделю{week ? ` (${week})` : ''}</div>
-          <div className="value">{week ? `${fmt(now.revenue)} ${cur}` : '—'}</div>
+          <div className="value">{now.hasRevenue ? `${fmt(now.revenue)} ${cur}` : '—'}</div>
           <div className="delta">{delta === null ? 'нет данных для сравнения' : `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}% к прошлой неделе`}</div>
         </div>
         <div className="card kpi">
           <div className="label">Средний чек</div>
-          <div className="value">{week ? `${fmt(now.avgCheck)} ${cur}` : '—'}</div>
+          <div className="value">{now.hasRevenue ? `${fmt(now.avgCheck)} ${cur}` : '—'}</div>
           <div className="delta">{fmt(now.checks)} чеков за неделю</div>
         </div>
       </div>

@@ -132,6 +132,20 @@ export interface DaySales {
   lines: { recipeId: string; count: number }[];
 }
 
+/** Выручка за день по точке. Вносится вручную; неделя, месяц и год собираются из дней. */
+export interface DayMetric {
+  id: string;
+  locationId: string;
+  date: string; // YYYY-MM-DD
+  /** Общая выручка за день (включает бар) */
+  revenue: number;
+  /** Выручка бара: часть общей выручки */
+  barRevenue: number;
+  checks: number;
+  guests: number;
+}
+
+/** Недельная запись. Выручка и чеки теперь берутся из дней; запись нужна для себестоимости (до месячного расчёта). */
 export interface MetricEntry {
   id: string;
   locationId: string;
@@ -219,6 +233,7 @@ export interface AppState {
   stocktakes: Stocktake[];
   writeOffs: WriteOff[];
   daySales: DaySales[];
+  dayMetrics: DayMetric[];
   metrics: MetricEntry[];
   equipment: Equipment[];
   repairs: Repair[];

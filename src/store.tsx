@@ -210,6 +210,7 @@ export function migrate(raw: unknown): AppState | null {
     stocktakes: r.stocktakes ?? [],
     writeOffs: writeOffs0,
     daySales: r.daySales ?? [],
+    dayMetrics: r.dayMetrics ?? [],
     metrics: r.metrics ?? [],
     equipment: r.equipment ?? [],
     repairs: r.repairs ?? [],
@@ -307,25 +308,202 @@ export function dialIssues(d: Pick<DialIn, 'doseG' | 'yieldG' | 'timeS'>, t: Esp
   return issues;
 }
 
+// ——— Показатели: периоды (день, неделя, месяц, год) ———
+// Выручка вносится по дням. Неделя, месяц и год складываются из дней: суммируем выручку, чеки
+// и гостей, а средние (чек, выручка на гостя, доля бара) считаем заново из сумм, не усредняем.
+
+export type PeriodKind = 'day' | 'week' | 'month' | 'year';
+
+const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+const WEEKDAYS = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+
+/** Неделя по ISO (с понедельника): YYYY-Www. */
+export function isoWeekOf(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 3); // четверг этой недели
+  const year = d.getUTCFullYear();
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const week = 1 + Math.round(((d.getTime() - jan4.getTime()) / 86400000 - 3 + ((jan4.getUTCDay() + 6) % 7)) / 7);
+  return `${year}-W${String(week).padStart(2, '0')}`;
+}
+
+/** Понедельник недели YYYY-Www. */
+export function weekMonday(week: string): string {
+  const [y, w] = week.split('-W').map(Number);
+  const jan4 = new Date(Date.UTC(y, 0, 4));
+  const monday1 = jan4.getTime() - ((jan4.getUTCDay() + 6) % 7) * 86400000;
+  return new Date(monday1 + (w - 1) * 7 * 86400000).toISOString().slice(0, 10);
+}
+
+/** Ключ периода, в который попадает дата: день, YYYY-Www, YYYY-MM или YYYY. */
+export function periodKey(date: string, kind: PeriodKind): string {
+  if (kind === 'day') return date;
+  if (kind === 'week') return isoWeekOf(date);
+  return kind === 'month' ? date.slice(0, 7) : date.slice(0, 4);
+}
+
+/** Первый день периода (у недели — понедельник). */
+export function periodStart(key: string, kind: PeriodKind): string {
+  if (kind === 'day') return key;
+  if (kind === 'week') return weekMonday(key);
+  return kind === 'month' ? `${key}-01` : `${key}-01-01`;
+}
+
+/** Сдвиг периода на n шагов назад или вперёд (−1 — предыдущий). */
+export function shiftPeriod(key: string, kind: PeriodKind, n: number): string {
+  if (kind === 'day') return addDays(key, n);
+  if (kind === 'week') return isoWeekOf(addDays(weekMonday(key), n * 7));
+  if (kind === 'month') {
+    const [y, m] = key.split('-').map(Number);
+    const t = y * 12 + (m - 1) + n;
+    return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`;
+  }
+  return String(Number(key) + n);
+}
+
+/** Последний день периода. */
+export const periodEnd = (key: string, kind: PeriodKind) => addDays(periodStart(shiftPeriod(key, kind, 1), kind), -1);
+
+/** Тот же период год назад. День и неделя берутся на 364 дня раньше, чтобы совпал день недели. */
+export function yearAgoKey(key: string, kind: PeriodKind): string {
+  if (kind === 'day') return addDays(key, -364);
+  if (kind === 'week') return isoWeekOf(addDays(weekMonday(key), -364));
+  return shiftPeriod(key, kind, kind === 'month' ? -12 : -1);
+}
+
+/** Полная подпись периода: «пн 19.10.2026», «Неделя 43: 19 окт – 25 окт», «Октябрь 2026», «2026». */
+export function periodLabel(key: string, kind: PeriodKind): string {
+  if (kind === 'day') {
+    const [y, m, d] = key.split('-');
+    return `${WEEKDAYS[new Date(`${key}T00:00:00Z`).getUTCDay()]} ${d}.${m}.${y}`;
+  }
+  if (kind === 'week') {
+    const from = weekMonday(key);
+    const to = addDays(from, 6);
+    const f = (iso: string) => `${Number(iso.slice(8))} ${MONTHS_SHORT[Number(iso.slice(5, 7)) - 1]}`;
+    return `Неделя ${Number(key.slice(6))}: ${f(from)} – ${f(to)}`;
+  }
+  if (kind === 'month') return `${MONTHS[Number(key.slice(5)) - 1]} ${key.slice(0, 4)}`;
+  return key;
+}
+
+/** Короткая подпись периода под столбцом графика. */
+export function periodShort(key: string, kind: PeriodKind): string {
+  if (kind === 'day') return `${key.slice(8)}.${key.slice(5, 7)}`;
+  if (kind === 'week') return `Н${Number(key.slice(6))}`;
+  return kind === 'month' ? MONTHS_SHORT[Number(key.slice(5)) - 1] : key;
+}
+
+export interface DayTotals {
+  revenue: number;
+  barRevenue: number;
+  checks: number;
+  guests: number;
+  /** Сколько разных дней внесено */
+  days: number;
+}
+
+/** Суммы по дням за период. limitDays — учитывать только первые N+1 дней периода (для честного сравнения неполных периодов). */
+export function periodTotals(state: AppState, scope: string, kind: PeriodKind, key: string, limitDays?: number): DayTotals {
+  const start = periodStart(key, kind);
+  const dates = new Set<string>();
+  const t: DayTotals = { revenue: 0, barRevenue: 0, checks: 0, guests: 0, days: 0 };
+  state.dayMetrics.forEach((d) => {
+    if (!inScope(d.locationId, scope) || periodKey(d.date, kind) !== key) return;
+    if (limitDays !== undefined && daysBetween(start, d.date) > limitDays) return;
+    t.revenue += d.revenue;
+    t.barRevenue += d.barRevenue;
+    t.checks += d.checks;
+    t.guests += d.guests;
+    dates.add(d.date);
+  });
+  t.days = dates.size;
+  return t;
+}
+
+export const avgCheckOf = (t: DayTotals) => (t.checks ? t.revenue / t.checks : 0);
+export const perGuestOf = (t: DayTotals) => (t.guests ? t.revenue / t.guests : 0);
+export const barShareOf = (t: DayTotals) => (t.revenue ? (t.barRevenue / t.revenue) * 100 : 0);
+/** Изменение в процентах. Если сравнивать не с чем (до нуля), возвращает null. */
+export const changePct = (now: number, before: number): number | null => (before > 0 ? ((now - before) / before) * 100 : null);
+
+/** Последняя дата, по которой внесена выручка (в выбранной области). */
+export function lastMetricDate(state: AppState, scope: string): string | null {
+  let best: string | null = null;
+  state.dayMetrics.forEach((d) => {
+    if (inScope(d.locationId, scope) && (!best || d.date > best)) best = d.date;
+  });
+  return best;
+}
+
+/**
+ * Сводка периода и сравнения: с прошлым периодом и с тем же периодом год назад.
+ * Если период ещё не закончился, прошлые периоды берутся за то же число дней с начала: так
+ * середина месяца сравнивается с серединой прошлого месяца, а не с целым.
+ */
+export function periodCompare(state: AppState, scope: string, kind: PeriodKind, key: string) {
+  const last = lastMetricDate(state, scope);
+  const end = periodEnd(key, kind);
+  const start = periodStart(key, kind);
+  const partial = !!last && periodKey(last, kind) === key && last < end;
+  const cut = partial && last ? daysBetween(start, last) : undefined;
+  return {
+    now: periodTotals(state, scope, kind, key, cut),
+    prev: periodTotals(state, scope, kind, shiftPeriod(key, kind, -1), cut),
+    yearAgo: periodTotals(state, scope, kind, yearAgoKey(key, kind), cut),
+    partial,
+    /** Сколько дней периода учтено при сравнении (с начала периода) */
+    daysCompared: cut === undefined ? null : cut + 1,
+  };
+}
+
+/** Ряд для графика: count периодов, последний — endKey. */
+export function periodSeries(state: AppState, scope: string, kind: PeriodKind, endKey: string, count: number): { key: string; t: DayTotals }[] {
+  const keys: string[] = [];
+  let k = endKey;
+  for (let i = 0; i < count; i++) {
+    keys.unshift(k);
+    k = shiftPeriod(k, kind, -1);
+  }
+  return keys.map((key) => ({ key, t: periodTotals(state, scope, kind, key) }));
+}
+
+/** Недели для отчёта: недельные записи и завершённые недели из дней (неполная неделя исказила бы сравнение). */
+function reportWeeks(state: AppState): string[] {
+  const today = todayISO();
+  const set = new Set(state.metrics.map((m) => m.week));
+  state.dayMetrics.forEach((d) => {
+    const w = isoWeekOf(d.date);
+    if (addDays(weekMonday(w), 6) < today) set.add(w);
+  });
+  return [...set].sort();
+}
+
 /** Последняя неделя, по которой есть данные. */
 export function lastWeek(state: AppState): string | null {
-  const weeks = state.metrics.map((m) => m.week).sort();
+  const weeks = reportWeeks(state);
   return weeks.length ? weeks[weeks.length - 1] : null;
 }
 
 /** Неделя, предшествующая данной, среди тех, по которым есть данные. */
 export function prevWeekOf(state: AppState, week: string): string | undefined {
-  const weeks = [...new Set(state.metrics.map((m) => m.week))].sort();
+  const weeks = reportWeeks(state);
   return weeks[weeks.indexOf(week) - 1];
 }
 
-/** Итоги недели по выбранной области: выручка, чеки, средняя себестоимость. */
+/**
+ * Итоги недели по выбранной области: выручка, чеки, средняя себестоимость.
+ * Выручка и чеки берутся из дней; если по неделе дней нет, из старой недельной записи.
+ */
 export function weekSummary(state: AppState, week: string | undefined, scope: string) {
   const rows = state.metrics.filter((m) => m.week === week && inScope(m.locationId, scope));
-  const revenue = rows.reduce((a, r) => a + r.revenue, 0);
-  const checks = rows.reduce((a, r) => a + r.checks, 0);
+  const days: DayTotals = week ? periodTotals(state, scope, 'week', week) : { revenue: 0, barRevenue: 0, checks: 0, guests: 0, days: 0 };
+  const fromDays = days.days > 0;
+  const revenue = fromDays ? days.revenue : rows.reduce((a, r) => a + r.revenue, 0);
+  const checks = fromDays ? days.checks : rows.reduce((a, r) => a + r.checks, 0);
   const cogs = rows.length ? rows.reduce((a, r) => a + r.cogsPct, 0) / rows.length : 0;
-  return { revenue, checks, cogs, avgCheck: checks ? revenue / checks : 0, count: rows.length };
+  return { revenue, checks, cogs, avgCheck: checks ? revenue / checks : 0, count: rows.length, hasRevenue: fromDays || rows.length > 0 };
 }
 
 /** Доля записей настройки в допуске. days — окно в днях (без него все записи). */
@@ -500,7 +678,7 @@ export function buildReport(state: AppState, scope: string): ReportData {
   if (week) {
     const w = weekSummary(state, week, scope);
     nums.push(`Неделя ${week}: выручка ${fmt(w.revenue)} ${cur}, средний чек ${fmt(w.avgCheck)} ${cur}`);
-    nums.push(`Себестоимость ${w.cogs.toFixed(1)}% при цели ${settings.cogsTargetPct}%`);
+    nums.push(w.count ? `Себестоимость ${w.cogs.toFixed(1)}% при цели ${settings.cogsTargetPct}%` : 'Себестоимость за эту неделю не внесена');
   } else {
     nums.push('Данных по неделям пока нет');
   }

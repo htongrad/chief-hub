@@ -1,4 +1,4 @@
-import type { AppState, Attestation, Complaint, DialIn, Equipment, BaseUnit, DaySales, InventoryItem, MetricEntry, ModuleId, Receipt, Recipe, Repair, Staff, Stocktake, Visit, WriteOff } from './types';
+import type { AppState, Attestation, Complaint, DayMetric, DialIn, Equipment, BaseUnit, DaySales, InventoryItem, MetricEntry, ModuleId, Receipt, Recipe, Repair, Staff, Stocktake, Visit, WriteOff } from './types';
 
 /** Все разделы включены. Используется для демо и при переносе данных старой версии. */
 export const defaultModules = (): Record<ModuleId, boolean> => ({
@@ -164,6 +164,25 @@ export function makeSeed(): AppState {
     });
   });
 
+  // Выручка по дням: 70 последних дней по каждой точке, детерминированно (выходные выше будней).
+  const dayMetrics: DayMetric[] = [];
+  const dowK = [1.15, 0.9, 0.92, 0.95, 1.0, 1.1, 1.18]; // воскресенье … суббота
+  locations.forEach((loc, li) => {
+    const b = base[loc.id];
+    for (let n = 1; n <= 70; n++) {
+      const date = iso(n);
+      const dow = new Date(`${date}T00:00:00Z`).getUTCDay();
+      const wobble = 1 + (((n * 7 + li * 5) % 11) - 5) / 100;
+      const trend = 1 + (70 - n) * 0.0008;
+      const k = dowK[dow] * wobble * trend;
+      const checks = Math.round((b.checks / 7) * k);
+      const revenue = Math.round((b.rev / 7) * k / 10) * 10;
+      const guests = Math.round(checks * (1.25 + ((n + li) % 4) * 0.02));
+      const barRevenue = Math.round((revenue * (0.78 + ((n + li) % 5) * 0.01)) / 10) * 10;
+      dayMetrics.push({ id: `dm-${loc.id}-${date}`, locationId: loc.id, date, revenue, barRevenue, checks, guests });
+    }
+  });
+
   const eq = (id: string, locationId: string, name: string, kind: Equipment['kind'], intervalDays: number, lastServiceDate: string | null): Equipment => ({
     id, locationId, name, kind, intervalDays, lastServiceDate,
   });
@@ -215,6 +234,7 @@ export function makeSeed(): AppState {
     stocktakes,
     writeOffs,
     daySales,
+    dayMetrics,
     metrics,
     equipment,
     repairs,
