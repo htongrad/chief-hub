@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { AUDIT_ITEM_TEXT, MYSTERY_CHECKS, ROUND_CHECKS, type AuditGroup } from '../config';
+import type { ComplaintAction } from '../types';
+import { AUDIT_ITEM_TEXT, COMPLAINT_ACTIONS, MYSTERY_CHECKS, ROUND_CHECKS, type AuditGroup } from '../config';
 import { auditIssues, auditScore, inScope, locName, serviceScore, todayISO, uid, useStore } from '../store';
 
 type Answers = Record<string, 0 | 1 | 2>;
@@ -123,7 +124,14 @@ export default function Rounds() {
     update((s) => ({ ...s, complaints: [{ id: uid(), locationId: cm.locationId || defLoc, date: todayISO(), text: cm.text.trim(), resolved: cm.kind === 'praise', kind: cm.kind }, ...s.complaints] }));
     setCm({ ...cm, text: '' });
   };
-  const toggleComplaint = (id: string) => update((s) => ({ ...s, complaints: s.complaints.map((c) => (c.id === id ? { ...c, resolved: !c.resolved } : c)) }));
+  const [closing, setClosing] = useState<{ id: string; action: ComplaintAction | ''; text: string } | null>(null);
+  const reopenComplaint = (id: string) => update((s) => ({ ...s, complaints: s.complaints.map((c) => (c.id === id ? { ...c, resolved: false, resolvedDate: undefined, action: undefined, resolution: undefined } : c)) }));
+  const closeComplaint = () => {
+    if (!closing || !closing.action) return;
+    const { id, action, text } = closing;
+    update((s) => ({ ...s, complaints: s.complaints.map((c) => (c.id === id ? { ...c, resolved: true, resolvedDate: todayISO(), action, resolution: text.trim() } : c)) }));
+    setClosing(null);
+  };
   const removeComplaint = (id: string) => confirm('Удалить жалобу?') && update((s) => ({ ...s, complaints: s.complaints.filter((c) => c.id !== id) }));
   const removeVisit = (id: string) => confirm('Удалить запись?') && update((s) => ({ ...s, visits: s.visits.filter((v) => v.id !== id) }));
 
@@ -244,11 +252,14 @@ export default function Rounds() {
                     <td>
                       {c.text}
                       <div className="small muted">{locName(state, c.locationId)} · {c.date}</div>
+                      {c.kind !== 'praise' && c.resolved && (c.action || c.resolution) && (
+                        <div className="small muted">Закрыта{c.resolvedDate ? ` ${c.resolvedDate}` : ''}: {COMPLAINT_ACTIONS.find((a) => a.id === c.action)?.label ?? ''}{c.resolution ? ` — ${c.resolution}` : ''}</div>
+                      )}
                     </td>
                     <td>{c.kind === 'praise' ? <span className="pill ok">похвала</span> : c.resolved ? <span className="pill ok">решена</span> : <span className="pill warn">открыта</span>}</td>
                     <td>
                       <div className="row">
-                        {c.kind !== 'praise' && <button className="btn ghost sm" onClick={() => toggleComplaint(c.id)}>{c.resolved ? 'Вернуть' : 'Решена'}</button>}
+                        {c.kind !== 'praise' && <button className="btn ghost sm" onClick={() => (c.resolved ? reopenComplaint(c.id) : setClosing({ id: c.id, action: '', text: '' }))}>{c.resolved ? 'Вернуть' : 'Закрыть'}</button>}
                         <button className="btn danger sm" onClick={() => removeComplaint(c.id)} aria-label="Удалить жалобу">×</button>
                       </div>
                     </td>
@@ -259,6 +270,25 @@ export default function Rounds() {
           </div>
         </div>
       </div>
+      {closing && (
+        <div className="modal-bg" onClick={() => setClosing(null)}>
+          <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <h3>Закрыть жалобу</h3>
+            <p className="small muted" style={{ margin: '4px 0 8px' }}>{state.complaints.find((c) => c.id === closing.id)?.text}</p>
+            {COMPLAINT_ACTIONS.map((a) => (
+              <label className="check" key={a.id}>
+                <input type="radio" name="complaint-action" checked={closing.action === a.id} onChange={() => setClosing({ ...closing, action: a.id })} />
+                <span>{a.label}</span>
+              </label>
+            ))}
+            <textarea rows={3} style={{ marginTop: 8 }} placeholder="Что сделали (необязательно)" value={closing.text} onChange={(e) => setClosing({ ...closing, text: e.target.value })} />
+            <div className="row" style={{ marginTop: 10, justifyContent: 'flex-end' }}>
+              <button className="btn ghost" onClick={() => setClosing(null)}>Отмена</button>
+              <button className="btn" onClick={closeComplaint} disabled={!closing.action}>Закрыть жалобу</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

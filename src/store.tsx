@@ -905,6 +905,16 @@ export function auditScore(answers: Record<string, 0 | 1 | 2>): { score: number 
   return { score: Math.round((vals.reduce<number>((a, v) => a + v, 0) / (vals.length * 2)) * 100), answered: vals.length };
 }
 
+/** Жалобы по области: открытые сейчас, получено и закрыто за days дней, как закрыли. Закрытые раньше без даты в «закрыто» не входят. */
+export function complaintStats(state: AppState, scope: string, days: number) {
+  const today = todayISO();
+  const list = state.complaints.filter((c) => c.kind !== 'praise' && inScope(c.locationId, scope));
+  const closed = list.filter((c) => c.resolved && c.resolvedDate && daysBetween(c.resolvedDate, today) <= days);
+  const by = { fixed: 0, discussed: 0, noaction: 0 };
+  closed.forEach((c) => { if (c.action) by[c.action] += 1; });
+  return { open: list.filter((c) => !c.resolved).length, received: list.filter((c) => daysBetween(c.date, today) <= days).length, closed: closed.length, by };
+}
+
 /** Проблемные пункты бланка: все «нет» и «частично» с пояснением. Для журнала и копии на Диске. */
 export function auditIssues(answers: Record<string, 0 | 1 | 2> | undefined, notes: Record<string, string> | undefined, textOf: Record<string, string>): string[] {
   if (!answers) return [];
@@ -1097,7 +1107,12 @@ export function buildReport(state: AppState, scope: string): ReportData {
   const guest: string[] = [];
   guest.push(rounds.length ? `Обходов за 7 дней: ${rounds.length}, средний балл ${Math.round(rounds.reduce((a, v) => a + v.score, 0) / rounds.length)}%` : 'Обходов за 7 дней не было');
   if (mystery.length) guest.push(`Тайный гость за 30 дней: средний балл ${Math.round(mystery.reduce((a, v) => a + v.score, 0) / mystery.length)}%`);
-  guest.push(`Открытых жалоб гостей: ${state.complaints.filter((c) => c.kind !== 'praise' && !c.resolved && inScope(c.locationId, scope)).length}`);
+  const cs = complaintStats(state, scope, 30);
+  guest.push(`Открытых жалоб гостей сейчас: ${cs.open} (любой давности)`);
+  if (cs.received || cs.closed) {
+    const how = [cs.by.fixed && `исправлено ${cs.by.fixed}`, cs.by.discussed && `разобрано с сотрудниками ${cs.by.discussed}`, cs.by.noaction && `без действий ${cs.by.noaction}`].filter(Boolean).join(', ');
+    guest.push(`Жалобы за 30 дней: получено ${cs.received}, закрыто ${cs.closed}${how ? ` (${how})` : ''}`);
+  }
   const praise = state.complaints.filter((c) => c.kind === 'praise' && inScope(c.locationId, scope) && within(c.date, 30));
   if (praise.length) guest.push(`Похвал от гостей за 30 дней: ${praise.length}`);
   sections.push({ title: 'Гость и точки', lines: guest });

@@ -202,7 +202,14 @@ export interface Complaint {
   text: string;
   resolved: boolean; // для похвалы не используется
   kind?: 'complaint' | 'praise';
+  /** Закрытие жалобы: когда, что сделали и пояснение. Нет у жалоб, закрытых раньше. */
+  resolvedDate?: string;
+  action?: ComplaintAction;
+  resolution?: string;
 }
+
+/** Как отработана жалоба: исправлено, разобрано с сотрудником или действий не требуется. */
+export type ComplaintAction = 'fixed' | 'discussed' | 'noaction';
 
 export interface EspressoTarget {
   ratio: number; // выход / доза
