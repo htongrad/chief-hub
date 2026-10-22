@@ -1,22 +1,53 @@
 import { useState } from 'react';
 import { AUDIT_ITEM_TEXT, MYSTERY_CHECKS, ROUND_CHECKS, type AuditGroup } from '../config';
-import { auditScore, inScope, locName, serviceScore, todayISO, uid, useStore } from '../store';
+import { auditIssues, auditScore, inScope, locName, serviceScore, todayISO, uid, useStore } from '../store';
 
 type Answers = Record<string, 0 | 1 | 2>;
+type Notes = Record<string, string>;
 const CHOICES: { v: 0 | 1 | 2; label: string }[] = [
   { v: 2, label: 'Да' },
   { v: 1, label: 'Частично' },
   { v: 0, label: 'Нет' },
 ];
 
-/** Бланк: у каждого пункта три кнопки. Повторное нажатие снимает оценку (пункт пропущен). */
-function AuditSheet({ groups, answers, onChange }: { groups: AuditGroup[]; answers: Answers; onChange: (a: Answers) => void }) {
+/**
+ * Бланк: у каждого пункта три кнопки. Повторное нажатие снимает оценку (пункт пропущен).
+ * На «Частично» и «Нет» открывается окно для пояснения: что именно не так.
+ */
+function AuditSheet({ groups, answers, notes, onChange }: { groups: AuditGroup[]; answers: Answers; notes: Notes; onChange: (a: Answers, n: Notes) => void }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+
   const pick = (id: string, v: 0 | 1 | 2) => {
-    const next = { ...answers };
-    if (next[id] === v) delete next[id];
-    else next[id] = v;
-    onChange(next);
+    const a = { ...answers };
+    const n = { ...notes };
+    if (a[id] === v) {
+      delete a[id];
+      delete n[id];
+      onChange(a, n);
+      return;
+    }
+    a[id] = v;
+    if (v === 2) delete n[id];
+    onChange(a, n);
+    if (v !== 2) {
+      setDraft(n[id] ?? '');
+      setEditing(id);
+    }
   };
+  const openNote = (id: string) => {
+    setDraft(notes[id] ?? '');
+    setEditing(id);
+  };
+  const saveNote = () => {
+    if (!editing) return;
+    const n = { ...notes };
+    if (draft.trim()) n[editing] = draft.trim();
+    else delete n[editing];
+    onChange(answers, n);
+    setEditing(null);
+  };
+
   return (
     <>
       {groups.map((g) => (
@@ -30,10 +61,28 @@ function AuditSheet({ groups, answers, onChange }: { groups: AuditGroup[]; answe
                   <button key={c.v} type="button" className={`${answers[it.id] === c.v ? 'on' : ''} v${c.v}`} onClick={() => pick(it.id, c.v)}>{c.label}</button>
                 ))}
               </div>
+              {(answers[it.id] === 0 || answers[it.id] === 1) && (
+                <button type="button" className="note-link" onClick={() => openNote(it.id)}>
+                  {notes[it.id] ? `Заметка: ${notes[it.id]}` : '+ Добавить заметку'}
+                </button>
+              )}
             </div>
           ))}
         </div>
       ))}
+      {editing && (
+        <div className="modal-bg" onClick={() => setEditing(null)}>
+          <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <h3>{answers[editing] === 0 ? 'Нет' : 'Частично'}: что не так?</h3>
+            <p className="small muted" style={{ margin: '4px 0 8px' }}>{AUDIT_ITEM_TEXT[editing]}</p>
+            <textarea autoFocus rows={4} placeholder="Например: молоко без даты вскрытия, на складе открытая пачка" value={draft} onChange={(e) => setDraft(e.target.value)} />
+            <div className="row" style={{ marginTop: 10, justifyContent: 'flex-end' }}>
+              <button className="btn ghost" onClick={() => setEditing(null)}>Без заметки</button>
+              <button className="btn" onClick={saveNote}>Сохранить</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -50,8 +99,8 @@ export default function Rounds() {
     .sort((a, b) => Number(a.resolved) - Number(b.resolved) || b.date.localeCompare(a.date));
   const praiseCount = complaints.filter((c) => c.kind === 'praise').length;
 
-  const [round, setRound] = useState<{ locationId: string; answers: Answers; note: string }>({ locationId: defLoc, answers: {}, note: '' });
-  const [mystery, setMystery] = useState<{ locationId: string; answers: Answers; note: string }>({ locationId: defLoc, answers: {}, note: '' });
+  const [round, setRound] = useState<{ locationId: string; answers: Answers; notes: Notes; note: string }>({ locationId: defLoc, answers: {}, notes: {}, note: '' });
+  const [mystery, setMystery] = useState<{ locationId: string; answers: Answers; notes: Notes; note: string }>({ locationId: defLoc, answers: {}, notes: {}, note: '' });
   const [cm, setCm] = useState<{ locationId: string; kind: 'complaint' | 'praise'; text: string }>({ locationId: defLoc, kind: 'complaint', text: '' });
 
   const roundRes = auditScore(round.answers);
@@ -61,13 +110,13 @@ export default function Rounds() {
 
   const saveRound = () => {
     if (roundRes.score === null) return;
-    update((s) => ({ ...s, visits: [{ id: uid(), locationId: round.locationId || defLoc, date: todayISO(), kind: 'round', score: roundRes.score as number, note: round.note.trim(), answers: round.answers }, ...s.visits] }));
-    setRound({ ...round, answers: {}, note: '' });
+    update((s) => ({ ...s, visits: [{ id: uid(), locationId: round.locationId || defLoc, date: todayISO(), kind: 'round', score: roundRes.score as number, note: round.note.trim(), answers: round.answers, itemNotes: round.notes }, ...s.visits] }));
+    setRound({ ...round, answers: {}, notes: {}, note: '' });
   };
   const saveMystery = () => {
     if (mysteryRes.score === null) return;
-    update((s) => ({ ...s, visits: [{ id: uid(), locationId: mystery.locationId || defLoc, date: todayISO(), kind: 'mystery', score: mysteryRes.score as number, note: mystery.note.trim(), answers: mystery.answers }, ...s.visits] }));
-    setMystery({ ...mystery, answers: {}, note: '' });
+    update((s) => ({ ...s, visits: [{ id: uid(), locationId: mystery.locationId || defLoc, date: todayISO(), kind: 'mystery', score: mysteryRes.score as number, note: mystery.note.trim(), answers: mystery.answers, itemNotes: mystery.notes }, ...s.visits] }));
+    setMystery({ ...mystery, answers: {}, notes: {}, note: '' });
   };
   const saveComplaint = () => {
     if (!cm.text.trim()) return;
@@ -78,10 +127,6 @@ export default function Rounds() {
   const removeComplaint = (id: string) => confirm('Удалить жалобу?') && update((s) => ({ ...s, complaints: s.complaints.filter((c) => c.id !== id) }));
   const removeVisit = (id: string) => confirm('Удалить запись?') && update((s) => ({ ...s, visits: s.visits.filter((v) => v.id !== id) }));
 
-  const weakItems = (a?: Answers) => {
-    const ids = a ? Object.keys(a).filter((id) => a[id] === 0 && AUDIT_ITEM_TEXT[id]) : [];
-    return ids.length ? ids.slice(0, 3).map((id) => AUDIT_ITEM_TEXT[id]).join('; ') + (ids.length > 3 ? ` и ещё ${ids.length - 3}` : '') : '';
-  };
   const scoreClass = (v: number) => (v >= visitMinScore ? 'ok' : v >= visitMinScore - 10 ? 'warn' : 'bad');
 
   return (
@@ -113,7 +158,7 @@ export default function Rounds() {
               </select>
             </div>
           </div>
-          <AuditSheet groups={ROUND_CHECKS} answers={round.answers} onChange={(answers) => setRound({ ...round, answers })} />
+          <AuditSheet groups={ROUND_CHECKS} answers={round.answers} notes={round.notes} onChange={(answers, notes) => setRound({ ...round, answers, notes })} />
           <div className="row" style={{ marginTop: 10 }}>
             <input style={{ flex: 1 }} placeholder="Заметка (необязательно)" value={round.note} onChange={(e) => setRound({ ...round, note: e.target.value })} />
             <button className="btn" onClick={saveRound} disabled={roundRes.score === null}>Сохранить</button>
@@ -135,7 +180,7 @@ export default function Rounds() {
                 </select>
               </div>
             </div>
-            <AuditSheet groups={MYSTERY_CHECKS} answers={mystery.answers} onChange={(answers) => setMystery({ ...mystery, answers })} />
+            <AuditSheet groups={MYSTERY_CHECKS} answers={mystery.answers} notes={mystery.notes} onChange={(answers, notes) => setMystery({ ...mystery, answers, notes })} />
             <div className="row" style={{ marginTop: 10 }}>
               <input style={{ flex: 1 }} placeholder="Что отметил гость" value={mystery.note} onChange={(e) => setMystery({ ...mystery, note: e.target.value })} />
               <button className="btn" onClick={saveMystery} disabled={mysteryRes.score === null}>Записать</button>
@@ -177,7 +222,7 @@ export default function Rounds() {
                 {visits.slice(0, 12).map((v) => (
                   <tr key={v.id}>
                     <td>{v.date}</td>
-                    <td>{locName(state, v.locationId)}{v.note && <div className="small muted">{v.note}</div>}{weakItems(v.answers) && <div className="small muted">Слабое: {weakItems(v.answers)}</div>}</td>
+                    <td>{locName(state, v.locationId)}{v.note && <div className="small muted">{v.note}</div>}{auditIssues(v.answers, v.itemNotes, AUDIT_ITEM_TEXT).map((t) => <div className="small muted" key={t}>{t}</div>)}</td>
                     <td>{v.kind === 'round' ? 'Обход' : 'Тайный гость'}</td>
                     <td className="num"><span className={`pill ${scoreClass(v.score)}`}>{v.score}%</span></td>
                     <td><button className="btn danger sm" onClick={() => removeVisit(v.id)} aria-label="Удалить запись">×</button></td>
