@@ -18,6 +18,7 @@ import {
   cogsPct,
   cogsPeriods,
   countDiffPct,
+  dayCosts,
   dialIssues,
   equipmentDue,
   fmt,
@@ -27,10 +28,14 @@ import {
   lastWeek,
   locName,
   overdueEquipmentCount,
+  portionCost,
   receiptUnitPrice,
   serviceScore,
   stability,
+  STOCK_FACTOR,
+  STOCK_LABEL,
   stockOf,
+  theoryVsActual,
   weekSummary,
 } from './store';
 import type { AppState } from './types';
@@ -144,11 +149,20 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
   // Качество: стандарты напитков (ТТК)
   sheets.push({
     name: 'ТТК',
-    header: ['Напиток', 'Ингредиенты', 'Способ приготовления', 'Описание для гостя', 'Обновлено'],
-    rows: state.recipes.map((r) =>
-      row(r.name, r.ingredients.map((i) => `${i.name} — ${i.amount} ${i.unit}`.trim()).join('\n'), r.method, r.guestDescription, r.updated)
-    ),
-    widths: [180, 260, 360, 320, 100],
+    header: ['Напиток', 'Ингредиенты', 'Способ приготовления', 'Описание для гостя', 'Обновлено', `Себестоимость порции, ${cur}`, 'Нет цены у'],
+    rows: state.recipes.map((r) => {
+      const pc = portionCost(state, r);
+      return row(
+        r.name,
+        r.ingredients.map((i) => `${i.name} — ${i.amount} ${i.unit}`.trim()).join('\n'),
+        r.method,
+        r.guestDescription,
+        r.updated,
+        pc.cost > 0 ? Math.round(pc.cost * 100) / 100 : '—',
+        pc.missing.join(', ') || '—'
+      );
+    }),
+    widths: [180, 260, 360, 320, 100, 170, 220],
   });
 
   // Команда: должность, аттестация, навыки
@@ -296,6 +310,60 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
         return mk('', '', '', '', '', '', '', '', '', '', v === null ? '' : v <= settings.cogsTargetPct ? 'ok' : v <= settings.cogsTargetPct + 3 ? 'warn' : 'bad');
       }),
       widths: [140, 100, 100, 150, 120, 150, 120, 140, 130, 130, 190, 110, 120, 220],
+    });
+  }
+
+  // Себестоимость по ТТК по дням: проданное × стоимость порции
+  {
+    const list = dayCosts(state, 'all').slice(0, 180);
+    sheets.push({
+      name: 'Себестоимость по дням',
+      header: ['Дата', 'Точка', 'Порций', `Себестоимость по ТТК, ${cur}`, `Выручка бара, ${cur}`, 'Себестоимость, % от выручки бара', 'Примечание'],
+      rows: list.map((d) =>
+        row(d.date, ln(d.locationId), d.portions, Math.round(d.cost), Math.round(d.barRevenue), d.pct === null ? '—' : Math.round(d.pct * 10) / 10, [d.pct === null ? 'нет выручки бара' : '', d.incomplete ? 'стоимость неполная' : ''].filter(Boolean).join(', '))
+      ),
+      marks: list.map((d) => mk('', '', '', '', '', d.pct === null ? '' : d.pct <= settings.cogsTargetPct ? 'ok' : d.pct <= settings.cogsTargetPct + 3 ? 'warn' : 'bad', '')),
+      widths: [100, 140, 80, 170, 140, 210, 220],
+    });
+  }
+
+  // Факт против ТТК: последний период между инвентаризациями по каждой точке
+  {
+    const rows: Cell[][] = [];
+    const marks: Mark[][] = [];
+    const bold: number[] = [];
+    const tol = settings.stocktakeTolPct;
+    const tone = (v: number | null): Mark => (v === null ? '' : Math.abs(v) <= tol ? 'ok' : Math.abs(v) <= tol * 2 ? 'warn' : 'bad');
+    const r1 = (n: number) => Math.round(n * 10) / 10;
+    const q3 = (n: number) => Math.round(n * 1000) / 1000;
+    state.locations.forEach((l) => {
+      const p = cogsPeriods(state, l.id)[0];
+      if (!p) return;
+      const rep = theoryVsActual(state, p);
+      const period = `${rep.from} — ${rep.to}`;
+      rep.rows.forEach((x) => {
+        rows.push(row(l.name, period, x.name, STOCK_LABEL[x.unit], q3(x.theoryQty / STOCK_FACTOR[x.unit]), q3(x.actualQty / STOCK_FACTOR[x.unit]), q3((x.actualQty - x.theoryQty) / STOCK_FACTOR[x.unit]), Math.round(x.theoryValue), Math.round(x.actualValue), Math.round(x.diffValue), x.diffPct === null ? '—' : r1(x.diffPct), Math.round(x.offValue)));
+        marks.push(mk('', '', '', '', '', '', '', '', '', '', tone(x.diffPct), ''));
+      });
+      const diff = rep.actualTotal - rep.theoryTotal;
+      const diffPct = rep.theoryTotal > 0 ? (diff / rep.theoryTotal) * 100 : null;
+      bold.push(rows.length);
+      rows.push(row(l.name, period, 'Итого по позициям из стандартов', '', '', '', '', Math.round(rep.theoryTotal), Math.round(rep.actualTotal), Math.round(diff), diffPct === null ? '—' : r1(diffPct), ''));
+      marks.push(mk('', '', '', '', '', '', '', '', '', '', tone(diffPct), ''));
+      rows.push(row(l.name, period, `Вне стандартов (позиций: ${rep.outsideCount})`, '', '', '', '', '', Math.round(rep.outsideValue), '', '', ''));
+      marks.push(mk('', '', '', '', '', '', '', '', '', '', '', ''));
+      if (rep.salesDays < rep.periodDays) {
+        rows.push(row(l.name, period, `Продажи внесены за ${rep.salesDays} из ${rep.periodDays} дней: разница завышена`, '', '', '', '', '', '', '', '', ''));
+        marks.push(mk('', '', 'warn', '', '', '', '', '', '', '', '', ''));
+      }
+    });
+    sheets.push({
+      name: 'Факт против ТТК',
+      header: ['Точка', 'Период', 'Позиция', 'Ед.', 'По ТТК, кол-во', 'Факт, кол-во', 'Разница, кол-во', `По ТТК, ${cur}`, `Факт, ${cur}`, `Разница, ${cur}`, 'Разница, %', `Из них списано, ${cur}`],
+      rows,
+      marks,
+      bold,
+      widths: [140, 200, 260, 50, 120, 110, 120, 110, 110, 120, 100, 150],
     });
   }
 

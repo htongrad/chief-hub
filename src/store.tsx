@@ -79,11 +79,12 @@ export function linkIngredients(inventory: InventoryItem[], recipes: Recipe[]): 
   return { inventory: inv, recipes: linked };
 }
 
-/** Расход позиции на точке по продажам за все дни: количество × норма из стандарта. */
-export function usageOf(state: AppState, itemId: string, locationId: string): number {
+/** Расход позиции на точке по продажам (за все дни или за период): количество × норма из стандарта. */
+export function usageOf(state: AppState, itemId: string, locationId: string, range?: { from: string; to: string }): number {
   let total = 0;
   state.daySales.forEach((d) => {
     if (d.locationId !== locationId) return;
+    if (range && !(d.date > range.from && d.date <= range.to)) return; // период: после from и по to включительно
     d.lines.forEach((ln) => {
       const r = state.recipes.find((x) => x.id === ln.recipeId);
       r?.ingredients.forEach((i) => {
@@ -136,6 +137,19 @@ export const fmtMoney = (n: number) => (n >= 100 ? fmt(n) : (Math.round(n * 100)
 // приходы − остаток на конец. Остатки оцениваются по средней цене позиции (с НДС, по сети),
 // приходы — по сумме накладной (без суммы — по средней цене). Позиции без цены не учитываются.
 
+/** Позиция внутри периода: нужна, чтобы сравнивать факт с расходом по стандартам. Количества в базовых единицах, цена за г, мл или шт. */
+export interface CogsLine {
+  itemId: string;
+  name: string;
+  unit: BaseUnit;
+  price: number;
+  openQty: number;
+  closeQty: number;
+  inQty: number;
+  inValue: number;
+  offQty: number;
+}
+
 export interface CogsPeriod {
   locationId: string;
   /** Дата предыдущей инвентаризации (точка отсчёта) и дата текущей */
@@ -157,6 +171,7 @@ export interface CogsPeriod {
   counted: number;
   total: number;
   noPrice: string[];
+  lines: CogsLine[];
 }
 
 /** Все периоды точки между инвентаризациями, последний первым. Нужны минимум две инвентаризации. */
@@ -184,6 +199,7 @@ export function cogsPeriods(state: AppState, locationId: string): CogsPeriod[] {
     let off = 0;
     let counted = 0;
     const noPrice: string[] = [];
+    const lines: CogsLine[] = [];
     items.forEach((it) => {
       const s0 = a.get(it.id);
       const s1 = b.get(it.id);
@@ -196,12 +212,22 @@ export function cogsPeriods(state: AppState, locationId: string): CogsPeriod[] {
       const base = p.perUnit / STOCK_FACTOR[it.unit]; // цена за г, мл или шт
       open += s0 * base;
       close += s1 * base;
+      let lineInQty = 0;
+      let lineInValue = 0;
+      let lineOffQty = 0;
       state.receipts.forEach((r) => {
-        if (r.itemId === it.id && r.locationId === locationId && inPeriod(r.date)) inn += r.sum && r.sum > 0 ? r.sum : r.qty * base;
+        if (r.itemId !== it.id || r.locationId !== locationId || !inPeriod(r.date)) return;
+        const v = r.sum && r.sum > 0 ? r.sum : r.qty * base;
+        inn += v;
+        lineInValue += v;
+        lineInQty += r.qty;
       });
       state.writeOffs.forEach((w) => {
-        if (w.itemId === it.id && w.locationId === locationId && inPeriod(w.date)) off += w.qty * base;
+        if (w.itemId !== it.id || w.locationId !== locationId || !inPeriod(w.date)) return;
+        off += w.qty * base;
+        lineOffQty += w.qty;
       });
+      lines.push({ itemId: it.id, name: it.name, unit: it.unit, price: base, openQty: s0, closeQty: s1, inQty: lineInQty, inValue: lineInValue, offQty: lineOffQty });
       counted++;
     });
     const days = new Set<string>();
@@ -229,6 +255,7 @@ export function cogsPeriods(state: AppState, locationId: string): CogsPeriod[] {
       counted,
       total: items.length,
       noPrice,
+      lines,
     });
   }
   return out.reverse();
@@ -257,6 +284,151 @@ export function cogsLatest(state: AppState, scope: string): { pct: number | null
       n++;
     });
   return { pct: n ? (cost / base) * 100 : null, locations: n };
+}
+
+// ——— Себестоимость по ТТК ———
+// Стоимость порции = норма каждого ингредиента × средняя цена позиции. Продано берётся из «Склад → Расход за день».
+
+/** Стоимость одной порции стандарта. missing — ингредиенты, которые не удалось оценить: нет цены, нет в стоке, единица вроде «шот». */
+export function portionCost(state: AppState, r: Recipe): { cost: number; missing: string[] } {
+  let cost = 0;
+  const missing: string[] = [];
+  r.ingredients.forEach((i) => {
+    if (!i.name.trim()) return;
+    const amount = parseFloat(i.amount.replace(',', '.'));
+    const u = parseUnit(i.unit);
+    const it = i.itemId ? state.inventory.find((x) => x.id === i.itemId) : undefined;
+    const p = it ? avgPrice(state, it) : null;
+    if (!(amount > 0) || !u || !it || !p) {
+      missing.push(i.name.trim());
+      return;
+    }
+    cost += (amount * u.factor * p.perUnit) / STOCK_FACTOR[it.unit];
+  });
+  return { cost, missing };
+}
+
+export interface DayCost {
+  locationId: string;
+  date: string;
+  /** Себестоимость проданного по ТТК за день */
+  cost: number;
+  portions: number;
+  /** Выручка бара за этот день (0, если не внесена) */
+  barRevenue: number;
+  pct: number | null;
+  /** У части проданных стандартов стоимость порции неполная */
+  incomplete: boolean;
+}
+
+/** Себестоимость по ТТК за каждый день, по которому внесены продажи: проданное × стоимость порции. Последние дни первыми. */
+export function dayCosts(state: AppState, scope: string): DayCost[] {
+  const cache = new Map<string, { cost: number; missing: string[] }>();
+  const costOf = (r: Recipe) => {
+    let v = cache.get(r.id);
+    if (!v) {
+      v = portionCost(state, r);
+      cache.set(r.id, v);
+    }
+    return v;
+  };
+  return state.daySales
+    .filter((d) => inScope(d.locationId, scope))
+    .map((d) => {
+      let cost = 0;
+      let portions = 0;
+      let incomplete = false;
+      d.lines.forEach((l) => {
+        const r = state.recipes.find((x) => x.id === l.recipeId);
+        if (!r || l.count <= 0) return;
+        const c = costOf(r);
+        cost += c.cost * l.count;
+        portions += l.count;
+        if (c.missing.length) incomplete = true;
+      });
+      const barRevenue = state.dayMetrics.filter((m) => m.locationId === d.locationId && m.date === d.date).reduce((a, m) => a + m.barRevenue, 0);
+      return { locationId: d.locationId, date: d.date, cost, portions, barRevenue, pct: barRevenue > 0 ? (cost / barRevenue) * 100 : null, incomplete };
+    })
+    .sort((a, b) => b.date.localeCompare(a.date) || a.locationId.localeCompare(b.locationId));
+}
+
+export interface TheoryRow {
+  itemId: string;
+  name: string;
+  unit: BaseUnit;
+  /** Сколько должно было уйти по стандартам и сколько ушло по факту (в базовых единицах) */
+  theoryQty: number;
+  actualQty: number;
+  theoryValue: number;
+  actualValue: number;
+  /** Факт минус ТТК: плюс — ушло больше, чем по стандартам */
+  diffValue: number;
+  diffPct: number | null;
+  /** Часть фактического расхода, записанная как списания */
+  offValue: number;
+}
+
+export interface TheoryReport {
+  locationId: string;
+  from: string;
+  to: string;
+  /** Позиции из стандартов: больше всего перерасход первым */
+  rows: TheoryRow[];
+  theoryTotal: number;
+  actualTotal: number;
+  /** Позиции вне стандартов (чистящее, салфетки и т. п.): фактический расход */
+  outsideValue: number;
+  outsideCount: number;
+  /** За сколько дней периода внесены продажи и сколько всего дней */
+  salesDays: number;
+  periodDays: number;
+}
+
+/** Факт против ТТК за период между инвентаризациями: по каждой позиции из стандартов, сколько должно было уйти и сколько ушло. */
+export function theoryVsActual(state: AppState, p: CogsPeriod): TheoryReport {
+  const inRecipes = new Set<string>();
+  state.recipes.forEach((r) => r.ingredients.forEach((i) => i.itemId && inRecipes.add(i.itemId)));
+  const rows: TheoryRow[] = [];
+  let outsideValue = 0;
+  let outsideCount = 0;
+  p.lines.forEach((l) => {
+    const actualQty = l.openQty + l.inQty - l.closeQty;
+    const actualValue = l.openQty * l.price + l.inValue - l.closeQty * l.price;
+    if (!inRecipes.has(l.itemId)) {
+      outsideValue += actualValue;
+      outsideCount++;
+      return;
+    }
+    const theoryQty = usageOf(state, l.itemId, p.locationId, { from: p.from, to: p.to });
+    const theoryValue = theoryQty * l.price;
+    const diffValue = actualValue - theoryValue;
+    rows.push({
+      itemId: l.itemId,
+      name: l.name,
+      unit: l.unit,
+      theoryQty,
+      actualQty,
+      theoryValue,
+      actualValue,
+      diffValue,
+      diffPct: theoryValue > 0 ? (diffValue / theoryValue) * 100 : null,
+      offValue: l.offQty * l.price,
+    });
+  });
+  rows.sort((a, b) => b.diffValue - a.diffValue);
+  const salesDays = new Set(state.daySales.filter((d) => d.locationId === p.locationId && d.date > p.from && d.date <= p.to).map((d) => d.date)).size;
+  return {
+    locationId: p.locationId,
+    from: p.from,
+    to: p.to,
+    rows,
+    theoryTotal: rows.reduce((a, r) => a + r.theoryValue, 0),
+    actualTotal: rows.reduce((a, r) => a + r.actualValue, 0),
+    outsideValue,
+    outsideCount,
+    salesDays,
+    periodDays: p.periodDays,
+  };
 }
 
 /** Расхождение факта и расчёта в процентах от большей из величин. */

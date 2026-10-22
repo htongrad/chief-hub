@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { dialIssues, inScope, linkIngredients, locName, todayISO, uid, useStore } from '../store';
+import { dialIssues, fmtMoney, inScope, linkIngredients, locName, portionCost, todayISO, uid, useStore } from '../store';
 
 const today = todayISO;
 
@@ -188,6 +188,16 @@ export default function Quality() {
                     {r.ingredients.map((i, k) => <li key={k}>{i.name} — {i.amount} {i.unit}{!i.itemId && <span className="muted small"> · не в стоке</span>}</li>)}
                   </ul>
                 )}
+                {(() => {
+                  const pc = portionCost(state, r);
+                  if (pc.cost === 0 && pc.missing.length === 0) return null;
+                  return (
+                    <div className="small" style={{ margin: '4px 0' }}>
+                      <b>Себестоимость порции:</b> {fmtMoney(pc.cost)} {state.settings.currency}
+                      {pc.missing.length > 0 && <span className="muted"> · неполная, нет цены или единицы (г, мл, шт) у: {pc.missing.join(', ')}</span>}
+                    </div>
+                  );
+                })()}
                 {r.method && <div className="small"><b>Приготовление:</b> {r.method}</div>}
                 {r.guestDescription && <div className="small" style={{ marginTop: 4 }}><b>Для гостя:</b> {r.guestDescription}</div>}
               </div>

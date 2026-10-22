@@ -24,6 +24,7 @@ import {
   type DayTotals,
   type PeriodKind,
 } from '../store';
+import TheoryCost from './TheoryCost';
 
 const KINDS: { id: PeriodKind; label: string; chart: number }[] = [
   { id: 'day', label: 'День', chart: 14 },
@@ -324,6 +325,8 @@ export default function Metrics() {
           </>
         )}
       </div>
+
+      <TheoryCost />
 
       <div className="card" id="day-form">
         <h2>Внести день</h2>
