@@ -260,4 +260,28 @@ export interface AppState {
   reportNote: string;
   /** Отмеченные пункты «Пути шефа» */
   playbook: string[];
+  /** Заметки к шагам «Пути шефа»: ключ — код шага */
+  playbookNotes: Record<string, PlaybookNote>;
+  /** Свои шаги, добавленные из заметок «Что всплыло» */
+  playbookCustom: PlaybookCustomStep[];
+}
+
+export interface PlaybookNote {
+  /** Дата отметки шага выполненным */
+  doneAt?: string;
+  /** Итог: что получилось */
+  result: string;
+  /** Что всплыло: вопрос или идея вне плана */
+  found: string;
+  /** «Что всплыло» разобрано (добавлено в план или закрыто) */
+  foundDone?: boolean;
+}
+
+export interface PlaybookCustomStep {
+  id: string;
+  stageId: string;
+  text: string;
+  created: string;
+  /** Код шага, из заметки которого появился этот шаг */
+  fromStep?: string;
 }

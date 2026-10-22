@@ -29,6 +29,7 @@ import {
   lastWeek,
   locName,
   overdueEquipmentCount,
+  playbookStages,
   portionCost,
   receiptUnitPrice,
   serviceScore,
@@ -414,6 +415,27 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
       rows: list.map((c) => row(c.date, ln(c.locationId), c.text, c.kind === 'praise' ? 'похвала' : c.resolved ? 'решена' : 'открыта', c.resolvedDate ?? '', COMPLAINT_ACTIONS.find((a) => a.id === c.action)?.label ?? '', c.resolution ?? '')),
       marks: list.map((c) => mk('', '', '', c.kind === 'praise' || c.resolved ? 'ok' : 'warn', '', '', '')),
       widths: [100, 140, 360, 100, 110, 180, 320],
+    });
+  }
+
+  // Путь шефа: шаги, отметки и заметки
+  {
+    const rows: Cell[][] = [];
+    const marks: Mark[][] = [];
+    playbookStages(state).forEach((st) =>
+      st.items.forEach((it) => {
+        const n = state.playbookNotes[it.id];
+        const on = state.playbook.includes(it.id);
+        rows.push(row(`${st.title} (${st.period})`, it.text + (it.custom ? ' (свой шаг)' : ''), on ? 'да' : '', on ? n?.doneAt ?? '' : '', n?.result ?? '', n?.found ?? '', n?.found ? (n.foundDone ? 'разобрано' : 'для разбора') : ''));
+        marks.push(mk('', '', on ? 'ok' : '', '', '', '', n?.found && !n.foundDone ? 'warn' : ''));
+      }),
+    );
+    sheets.push({
+      name: 'Путь шефа',
+      header: ['Этап', 'Шаг', 'Выполнено', 'Дата', 'Итог', 'Что всплыло', 'Статус заметки'],
+      rows,
+      marks,
+      widths: [200, 360, 90, 100, 320, 320, 120],
     });
   }
 

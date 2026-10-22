@@ -1,5 +1,4 @@
-import { PLAYBOOK } from '../config';
-import { attestSummary, buildSignals, cogsLatest, fmt, inScope, lastWeek, overdueEquipmentCount, prevWeekOf, serviceScore, stability, useStore, weekSummary } from '../store';
+import { attestSummary, playbookProgress, playbookStages, buildSignals, cogsLatest, fmt, inScope, lastWeek, overdueEquipmentCount, prevWeekOf, serviceScore, stability, useStore, weekSummary } from '../store';
 
 export default function Overview() {
   const { state } = useStore();
@@ -23,8 +22,7 @@ export default function Overview() {
   const signals = buildSignals(state, scope);
   const shown = signals.slice(0, 8);
 
-  const totalItems = PLAYBOOK.reduce((a, s) => a + s.items.length, 0);
-  const done = state.playbook.length;
+  const { done, total: totalItems } = playbookProgress(state);
 
   return (
     <div className="stack">
@@ -92,7 +90,7 @@ export default function Overview() {
           <p className="muted small" style={{ marginBottom: 10 }}>Выполнено {done} из {totalItems} шагов</p>
           <div className="progress" aria-label="Прогресс плана"><i style={{ width: `${totalItems ? (done / totalItems) * 100 : 0}%` }} /></div>
           <div className="stack" style={{ marginTop: 14, gap: 10 }}>
-            {PLAYBOOK.map((st) => {
+            {playbookStages(state).map((st) => {
               const d = st.items.filter((i) => state.playbook.includes(i.id)).length;
               return (
                 <div key={st.id}>
