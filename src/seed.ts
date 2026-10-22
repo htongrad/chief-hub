@@ -208,7 +208,9 @@ export function makeSeed(): AppState {
     { id: 'v5', locationId: 'l2', date: iso(10), kind: 'round', score: 70, note: '' },
   ];
 
-  const complaints: Complaint[] = [{ id: 'cm1', locationId: 'l2', date: iso(1), text: 'Долгое ожидание в утренний пик', resolved: false }];
+  const complaints: Complaint[] = [{ id: 'cm1', locationId: 'l2', date: iso(1), text: 'Долгое ожидание в утренний пик', resolved: false },
+    { id: 'cm2', locationId: 'l1', date: iso(2), text: 'Гость похвалил капучино и внимательного бариста', resolved: true, kind: 'praise' },
+  ];
 
   return {
     version: 5,
