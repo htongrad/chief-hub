@@ -4,6 +4,8 @@ import {
   avgCheckOf,
   barShareOf,
   changePct,
+  cogsPct,
+  cogsPeriods,
   fmt,
   inScope,
   lastMetricDate,
@@ -75,6 +77,14 @@ export default function Metrics() {
   // ——— Сравнение точек за период ———
   const locs = state.locations.filter((l) => inScope(l.id, scope));
   const byLoc = locs.map((l) => ({ l, t: periodTotals(state, l.id, kind, key, cmp.daysCompared === null ? undefined : cmp.daysCompared - 1) }));
+
+  // ——— Себестоимость по инвентаризации ———
+  const basis = state.settings.cogsBasis;
+  const target = state.settings.cogsTargetPct;
+  const basisName = basis === 'bar' ? 'бара' : 'общей';
+  const cogsByLoc = locs.map((l) => ({ l, list: cogsPeriods(state, l.id) }));
+  const cogsTone = (v: number | null) => (v === null ? '' : v <= target ? 'ok' : v <= target + 3 ? 'warn' : 'bad');
+  const setBasis = (b: 'bar' | 'all') => update((s) => ({ ...s, settings: { ...s.settings, cogsBasis: b } }));
 
   // ——— Ввод дня ———
   const yesterday = addDays(todayISO(), -1);
@@ -236,6 +246,84 @@ export default function Metrics() {
           </div>
         </div>
       )}
+
+      <div className="card">
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <h2 style={{ margin: 0 }}>Себестоимость по инвентаризации</h2>
+          <div className="row" style={{ gap: 6 }}>
+            <button className={`btn sm ${basis === 'bar' ? '' : 'ghost'}`} onClick={() => setBasis('bar')}>От бара</button>
+            <button className={`btn sm ${basis === 'all' ? '' : 'ghost'}`} onClick={() => setBasis('all')}>От общей</button>
+          </div>
+        </div>
+        <p className="small muted" style={{ margin: '8px 0' }}>
+          Расход = остаток на начало + приходы − остаток на конец, в {cur} по средней цене позиций. Период идёт между двумя инвентаризациями точки. Процент считается от выручки {basisName}, цель {target}%.
+        </p>
+        {cogsByLoc.every((x) => x.list.length === 0) ? (
+          <div className="empty">Нужны две инвентаризации на точке, приходы с суммами и выручка по дням. Первая инвентаризация — точка отсчёта.</div>
+        ) : (
+          <>
+            <div className="tablewrap">
+              <table>
+                <thead>
+                  <tr><th>Точка</th><th>Период</th><th className="num">Расход</th><th className="num">Из них списания</th><th className="num">Себестоимость</th><th className="num">Позиций</th></tr>
+                </thead>
+                <tbody>
+                  {cogsByLoc.map(({ l, list }) => {
+                    const p = list[0];
+                    if (!p) return <tr key={l.id}><td><b>{l.name}</b></td><td colSpan={5} className="muted">нужна ещё одна инвентаризация</td></tr>;
+                    const v = cogsPct(p, basis);
+                    return (
+                      <tr key={l.id}>
+                        <td><b>{l.name}</b></td>
+                        <td>{p.from} — {p.to}</td>
+                        <td className="num">{fmt(p.cost)} {cur}</td>
+                        <td className="num">{fmt(p.writeOffsValue)} {cur}</td>
+                        <td className="num">{v === null ? '—' : <span className={`pill ${cogsTone(v)}`}>{v.toFixed(1)}%</span>}</td>
+                        <td className="num">{p.counted} из {p.total}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {cogsByLoc.flatMap(({ l, list }) => {
+              const p = list[0];
+              if (!p) return [];
+              const notes: string[] = [];
+              if (cogsPct(p, basis) === null) notes.push('за этот период не внесена выручка, процент не посчитан');
+              else if (p.revenueDays < p.periodDays) notes.push(`выручка внесена за ${p.revenueDays} из ${p.periodDays} дней, процент завышен`);
+              if (p.noPrice.length) notes.push(`нет цены у позиций, они не учтены: ${p.noPrice.join(', ')}`);
+              const skipped = p.total - p.counted - p.noPrice.length;
+              if (skipped > 0) notes.push(`не пересчитано позиций: ${skipped}`);
+              return notes.map((n) => <p className="small muted" style={{ margin: '6px 0 0' }} key={`${l.id}-${n}`}>{l.name}: {n}.</p>);
+            })}
+            {cogsByLoc.some((x) => x.list.length > 1) && (
+              <details style={{ marginTop: 10 }}>
+                <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Прошлые периоды</summary>
+                <div className="tablewrap" style={{ marginTop: 8 }}>
+                  <table>
+                    <tbody>
+                      {cogsByLoc.flatMap(({ l, list }) =>
+                        list.slice(1).map((p) => {
+                          const v = cogsPct(p, basis);
+                          return (
+                            <tr key={`${l.id}-${p.to}`}>
+                              <td>{l.name}</td>
+                              <td>{p.from} — {p.to}</td>
+                              <td className="num">{fmt(p.cost)} {cur}</td>
+                              <td className="num">{v === null ? '—' : <span className={`pill ${cogsTone(v)}`}>{v.toFixed(1)}%</span>}</td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            )}
+          </>
+        )}
+      </div>
 
       <div className="card" id="day-form">
         <h2>Внести день</h2>

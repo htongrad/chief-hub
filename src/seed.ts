@@ -219,6 +219,7 @@ export function makeSeed(): AppState {
       modules: defaultModules(),
       espresso: { ratio: 2, yieldTol: 2, timeMin: 25, timeMax: 30 },
       cogsTargetPct: 28,
+      cogsBasis: 'bar',
       attestDays: 180,
       visitMinScore: 80,
       stocktakeTolPct: 5,
