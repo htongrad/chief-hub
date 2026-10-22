@@ -213,6 +213,8 @@ export interface Settings {
   espresso: EspressoTarget;
   /** Целевая себестоимость, % */
   cogsTargetPct: number;
+  /** От какой выручки считать себестоимость по инвентаризации: бара или общей */
+  cogsBasis: 'bar' | 'all';
   /** Через сколько дней аттестация считается просроченной */
   attestDays: number;
   /** Минимальный балл обхода, % */

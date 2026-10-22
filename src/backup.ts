@@ -14,6 +14,9 @@ import {
   avgPrice,
   buildReport,
   buildSignals,
+  cogsLatest,
+  cogsPct,
+  cogsPeriods,
   countDiffPct,
   dialIssues,
   equipmentDue,
@@ -90,6 +93,11 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
     add(['Показатель', 'Значение', 'Норма или пояснение']);
     add(['Стабильность эспрессо, 30 дн.', st.pct === null ? '—' : `${st.pct}%`, `записей: ${st.total}`], st.pct === null ? '' : st.pct >= 80 ? 'ok' : st.pct >= 60 ? 'warn' : 'bad');
     add(['Себестоимость, последняя неделя', ws.count ? `${ws.cogs.toFixed(1)}%` : '—', `цель ${settings.cogsTargetPct}%${week ? `, неделя ${week}` : ''}`], ws.count ? (ws.cogs <= settings.cogsTargetPct ? 'ok' : 'bad') : '');
+    const cl = cogsLatest(state, 'all');
+    add(
+      ['Себестоимость по инвентаризации', cl.pct === null ? '—' : `${cl.pct.toFixed(1)}%`, cl.pct === null ? 'нужны две инвентаризации, приходы с суммами и выручка по дням' : `цель ${settings.cogsTargetPct}%, от выручки ${settings.cogsBasis === 'bar' ? 'бара' : 'общей'}`],
+      cl.pct === null ? '' : cl.pct <= settings.cogsTargetPct ? 'ok' : 'bad'
+    );
     add(['Выручка, последняя неделя', ws.hasRevenue ? `${fmt(ws.revenue)} ${cur}` : '—', ws.hasRevenue ? `чеков ${fmt(ws.checks)}, средний чек ${fmt(ws.avgCheck)} ${cur}` : '']);
     add(['Аттестации действуют', att.pct === null ? '—' : `${att.pct}%`, `всего ${att.total}, просрочено ${att.due}, не пройдено ${att.failed}`], att.pct === null ? '' : att.due + att.failed === 0 ? 'ok' : 'warn');
     add(['Оборудование с просроченным ТО', overdue, ''], overdue ? 'bad' : 'ok');
@@ -253,6 +261,41 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
       rows: list.map((m) => row(m.week, ln(m.locationId), m.cogsPct)),
       marks: list.map((m) => mk('', '', m.cogsPct > settings.cogsTargetPct ? 'bad' : 'ok')),
       widths: [100, 140, 130],
+    });
+  }
+
+  // Себестоимость по инвентаризации: периоды между соседними инвентаризациями точки
+  {
+    const periods = state.locations.flatMap((l) => cogsPeriods(state, l.id)).sort((a, b) => b.to.localeCompare(a.to) || ln(a.locationId).localeCompare(ln(b.locationId)));
+    const basisName = settings.cogsBasis === 'bar' ? 'бара' : 'общей';
+    const rub = (n: number) => Math.round(n);
+    sheets.push({
+      name: 'Себестоимость по инвентаризации',
+      header: [
+        'Точка',
+        'С даты',
+        'По дату',
+        `Остаток на начало, ${cur}`,
+        `Приходы, ${cur}`,
+        `Остаток на конец, ${cur}`,
+        `Расход, ${cur}`,
+        `Из них списания, ${cur}`,
+        `Выручка бара, ${cur}`,
+        `Общая выручка, ${cur}`,
+        `Себестоимость, % от выручки ${basisName}`,
+        'Позиций учтено',
+        'Позиций на точке',
+        'Без цены (не учтены)',
+      ],
+      rows: periods.map((p) => {
+        const v = cogsPct(p, settings.cogsBasis);
+        return row(ln(p.locationId), p.from, p.to, rub(p.openValue), rub(p.receiptsValue), rub(p.closeValue), rub(p.cost), rub(p.writeOffsValue), rub(p.barRevenue), rub(p.revenue), v === null ? '—' : Math.round(v * 10) / 10, p.counted, p.total, p.noPrice.join(', ') || '—');
+      }),
+      marks: periods.map((p) => {
+        const v = cogsPct(p, settings.cogsBasis);
+        return mk('', '', '', '', '', '', '', '', '', '', v === null ? '' : v <= settings.cogsTargetPct ? 'ok' : v <= settings.cogsTargetPct + 3 ? 'warn' : 'bad');
+      }),
+      widths: [140, 100, 100, 150, 120, 150, 120, 140, 130, 130, 190, 110, 120, 220],
     });
   }
 

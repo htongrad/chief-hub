@@ -1,5 +1,5 @@
 import { PLAYBOOK } from '../config';
-import { attestSummary, buildSignals, fmt, inScope, lastWeek, overdueEquipmentCount, prevWeekOf, serviceScore, stability, useStore, weekSummary } from '../store';
+import { attestSummary, buildSignals, cogsLatest, fmt, inScope, lastWeek, overdueEquipmentCount, prevWeekOf, serviceScore, stability, useStore, weekSummary } from '../store';
 
 export default function Overview() {
   const { state } = useStore();
@@ -12,6 +12,7 @@ export default function Overview() {
   const now = weekSummary(state, week ?? undefined, scope);
   const prev = prevWeek ? weekSummary(state, prevWeek, scope) : null;
   const delta = prev && prev.revenue ? ((now.revenue - prev.revenue) / prev.revenue) * 100 : null;
+  const cogsL = cogsLatest(state, scope);
 
   const taste = stability(state, scope, 30);
   const service = serviceScore(state, scope, 30);
@@ -40,8 +41,12 @@ export default function Overview() {
         </div>
         <div className="card kpi">
           <div className="label">Себестоимость</div>
-          <div className="value">{now.count ? `${now.cogs.toFixed(1)}%` : '—'}</div>
-          <div className="delta">цель {settings.cogsTargetPct}%, среднее по выбранным точкам</div>
+          <div className="value">{cogsL.pct !== null ? `${cogsL.pct.toFixed(1)}%` : now.count ? `${now.cogs.toFixed(1)}%` : '—'}</div>
+          <div className="delta">
+            {cogsL.pct !== null
+              ? `цель ${settings.cogsTargetPct}%, по инвентаризации от выручки ${settings.cogsBasis === 'bar' ? 'бара' : 'общей'}`
+              : `цель ${settings.cogsTargetPct}%, ручная запись по неделе`}
+          </div>
         </div>
         <div className="card kpi">
           <div className="label">Команда</div>

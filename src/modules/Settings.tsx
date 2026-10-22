@@ -235,6 +235,12 @@ export default function SettingsPage() {
         <p className="muted small" style={{ marginBottom: 10 }}>По ним «Обзор» и «Отчёт» решают, что считать отклонением. Подберите под вашу сеть.</p>
         <div className="form">
           <div className="f">Целевая себестоимость, %<input type="number" step="0.5" min={0} max={100} value={settings.cogsTargetPct} onChange={(e) => setS({ cogsTargetPct: num(e.target.value, 28) })} /></div>
+          <div className="f">Себестоимость считать от выручки
+            <select value={settings.cogsBasis} onChange={(e) => setS({ cogsBasis: e.target.value === 'all' ? 'all' : 'bar' })}>
+              <option value="bar">бара</option>
+              <option value="all">общей</option>
+            </select>
+          </div>
           <div className="f">Аттестация действует, дн.<input type="number" min={1} value={settings.attestDays} onChange={(e) => setS({ attestDays: Math.max(1, num(e.target.value, 180)) })} /></div>
           <div className="f">Минимальный балл обхода, %<input type="number" min={0} max={100} value={settings.visitMinScore} onChange={(e) => setS({ visitMinScore: num(e.target.value, 80) })} /></div>
           <div className="f">Допустимое расхождение при инвентаризации, %<input type="number" min={0} max={100} step="0.5" value={settings.stocktakeTolPct} onChange={(e) => setS({ stocktakeTolPct: Math.max(0, num(e.target.value, 5)) })} /></div>

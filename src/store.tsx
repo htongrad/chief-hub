@@ -131,6 +131,134 @@ export function avgPrice(state: AppState, it: InventoryItem): { perUnit: number;
 /** Денежная сумма для экрана: крупные суммы без копеек, мелкие (цена за штуку) с копейками. */
 export const fmtMoney = (n: number) => (n >= 100 ? fmt(n) : (Math.round(n * 100) / 100).toLocaleString('ru-RU'));
 
+// ——— Себестоимость по инвентаризации ———
+// Период — между двумя соседними инвентаризациями точки. Расход в рублях = остаток на начало +
+// приходы − остаток на конец. Остатки оцениваются по средней цене позиции (с НДС, по сети),
+// приходы — по сумме накладной (без суммы — по средней цене). Позиции без цены не учитываются.
+
+export interface CogsPeriod {
+  locationId: string;
+  /** Дата предыдущей инвентаризации (точка отсчёта) и дата текущей */
+  from: string;
+  to: string;
+  openValue: number;
+  receiptsValue: number;
+  closeValue: number;
+  /** Расход за период: начало + приходы − конец */
+  cost: number;
+  /** Часть расхода, которая ушла в списания */
+  writeOffsValue: number;
+  revenue: number;
+  barRevenue: number;
+  /** За сколько дней периода внесена выручка и сколько всего дней в периоде */
+  revenueDays: number;
+  periodDays: number;
+  /** Сколько позиций учтено, сколько их на точке всего, какие без цены */
+  counted: number;
+  total: number;
+  noPrice: string[];
+}
+
+/** Все периоды точки между инвентаризациями, последний первым. Нужны минимум две инвентаризации. */
+export function cogsPeriods(state: AppState, locationId: string): CogsPeriod[] {
+  // Факт по датам. Новые записи лежат в начале списка, поэтому идём с конца: поздняя запись за ту же дату перекрывает раннюю.
+  const byDate = new Map<string, Map<string, number>>();
+  [...state.stocktakes].reverse().forEach((t) => {
+    if (t.locationId !== locationId) return;
+    const m = byDate.get(t.date) ?? new Map<string, number>();
+    t.lines.forEach((l) => m.set(l.itemId, l.actual));
+    byDate.set(t.date, m);
+  });
+  const dates = [...byDate.keys()].sort();
+  const items = state.inventory.filter((it) => itemAt(it, locationId));
+  const out: CogsPeriod[] = [];
+  for (let i = 1; i < dates.length; i++) {
+    const from = dates[i - 1];
+    const to = dates[i];
+    const a = byDate.get(from) as Map<string, number>;
+    const b = byDate.get(to) as Map<string, number>;
+    const inPeriod = (d: string) => d > from && d <= to;
+    let open = 0;
+    let close = 0;
+    let inn = 0;
+    let off = 0;
+    let counted = 0;
+    const noPrice: string[] = [];
+    items.forEach((it) => {
+      const s0 = a.get(it.id);
+      const s1 = b.get(it.id);
+      if (s0 === undefined || s1 === undefined) return;
+      const p = avgPrice(state, it);
+      if (!p) {
+        noPrice.push(it.name);
+        return;
+      }
+      const base = p.perUnit / STOCK_FACTOR[it.unit]; // цена за г, мл или шт
+      open += s0 * base;
+      close += s1 * base;
+      state.receipts.forEach((r) => {
+        if (r.itemId === it.id && r.locationId === locationId && inPeriod(r.date)) inn += r.sum && r.sum > 0 ? r.sum : r.qty * base;
+      });
+      state.writeOffs.forEach((w) => {
+        if (w.itemId === it.id && w.locationId === locationId && inPeriod(w.date)) off += w.qty * base;
+      });
+      counted++;
+    });
+    const days = new Set<string>();
+    let revenue = 0;
+    let barRevenue = 0;
+    state.dayMetrics.forEach((d) => {
+      if (d.locationId !== locationId || !inPeriod(d.date)) return;
+      revenue += d.revenue;
+      barRevenue += d.barRevenue;
+      days.add(d.date);
+    });
+    out.push({
+      locationId,
+      from,
+      to,
+      openValue: open,
+      receiptsValue: inn,
+      closeValue: close,
+      cost: open + inn - close,
+      writeOffsValue: off,
+      revenue,
+      barRevenue,
+      revenueDays: days.size,
+      periodDays: daysBetween(from, to),
+      counted,
+      total: items.length,
+      noPrice,
+    });
+  }
+  return out.reverse();
+}
+
+/** Себестоимость периода в процентах от выручки бара или общей. null — выручки за период нет. */
+export function cogsPct(p: CogsPeriod, basis: 'bar' | 'all'): number | null {
+  const base = basis === 'bar' ? p.barRevenue : p.revenue;
+  return base > 0 ? (p.cost / base) * 100 : null;
+}
+
+/** Последний расчёт по каждой точке выбранной области, сведённый в один процент (сумма расходов / сумма выручки). */
+export function cogsLatest(state: AppState, scope: string): { pct: number | null; locations: number } {
+  const basis = state.settings.cogsBasis;
+  let cost = 0;
+  let base = 0;
+  let n = 0;
+  state.locations
+    .filter((l) => inScope(l.id, scope))
+    .forEach((l) => {
+      const p = cogsPeriods(state, l.id)[0];
+      const b = p ? (basis === 'bar' ? p.barRevenue : p.revenue) : 0;
+      if (!p || b <= 0) return;
+      cost += p.cost;
+      base += b;
+      n++;
+    });
+  return { pct: n ? (cost / base) * 100 : null, locations: n };
+}
+
 /** Расхождение факта и расчёта в процентах от большей из величин. */
 export const countDiffPct = (expected: number, actual: number) => {
   const m = Math.max(Math.abs(expected), Math.abs(actual));
@@ -222,6 +350,7 @@ export function migrate(raw: unknown): AppState | null {
       modules: { ...defaultModules(), ...(s.modules ?? {}) },
       espresso: s.espresso ?? { ratio: 2, yieldTol: 2, timeMin: 25, timeMax: 30 },
       cogsTargetPct: s.cogsTargetPct ?? 28,
+      cogsBasis: s.cogsBasis ?? 'bar',
       attestDays: s.attestDays ?? 180,
       visitMinScore: s.visitMinScore ?? 80,
       stocktakeTolPct: s.stocktakeTolPct ?? 5,
@@ -613,8 +742,19 @@ export function buildSignals(state: AppState, scope: string): Signal[] {
 
   // Цифры: себестоимость выше цели, остатки ниже минимума
   const week = lastWeek(state);
+  // Себестоимость по инвентаризации; ручная недельная запись остаётся запасной для точек без расчёта
+  const cogsLocs = new Set<string>();
+  locs.forEach((l) => {
+    const p = cogsPeriods(state, l.id)[0];
+    const pct = p ? cogsPct(p, settings.cogsBasis) : null;
+    if (!p || pct === null) return;
+    cogsLocs.add(l.id);
+    if (pct > settings.cogsTargetPct) {
+      out.push({ level: 'warn', title: `${l.name}: себестоимость выше цели`, detail: `${pct.toFixed(1)}% при цели ${settings.cogsTargetPct}% (инвентаризации ${p.from} — ${p.to}, от выручки ${settings.cogsBasis === 'bar' ? 'бара' : 'общей'})` });
+    }
+  });
   state.metrics
-    .filter((m) => m.week === week && inScope(m.locationId, scope) && m.cogsPct > settings.cogsTargetPct)
+    .filter((m) => m.week === week && inScope(m.locationId, scope) && !cogsLocs.has(m.locationId) && m.cogsPct > settings.cogsTargetPct)
     .forEach((m) => out.push({ level: 'warn', title: `${ln(m.locationId)}: себестоимость выше цели`, detail: `${m.cogsPct}% при цели ${settings.cogsTargetPct}% (неделя ${m.week})` }));
   state.inventory.forEach((it) =>
     locs.forEach((l) => {
@@ -705,9 +845,15 @@ export function buildReport(state: AppState, scope: string): ReportData {
   if (week) {
     const w = weekSummary(state, week, scope);
     nums.push(`Неделя ${week}: выручка ${fmt(w.revenue)} ${cur}, средний чек ${fmt(w.avgCheck)} ${cur}`);
-    nums.push(w.count ? `Себестоимость ${w.cogs.toFixed(1)}% при цели ${settings.cogsTargetPct}%` : 'Себестоимость за эту неделю не внесена');
   } else {
     nums.push('Данных по неделям пока нет');
+  }
+  const cl = cogsLatest(state, scope);
+  if (cl.pct !== null) {
+    nums.push(`Себестоимость по инвентаризации ${cl.pct.toFixed(1)}% от выручки ${settings.cogsBasis === 'bar' ? 'бара' : 'общей'} при цели ${settings.cogsTargetPct}%`);
+  } else if (week) {
+    const w = weekSummary(state, week, scope);
+    nums.push(w.count ? `Себестоимость ${w.cogs.toFixed(1)}% при цели ${settings.cogsTargetPct}%` : 'Себестоимость не внесена');
   }
   const offs = state.writeOffs.filter((o) => inScope(o.locationId, scope) && within(o.date, 7));
   nums.push(`Списаний за 7 дней: ${offs.length}`);
