@@ -245,5 +245,11 @@ export function makeSeed(): AppState {
     complaints,
     reportNote: '',
     playbook: ['d0-1', 'd0-2', 'd0-3'],
+    playbookNotes: {
+      'd0-1': { doneAt: iso(3), result: 'Баллы аудита: 92, 78, 85. Слабее всего вторая точка: склад и маркировка.', found: 'На второй точке в пик не хватает рук: проверить график смен' },
+      'd0-2': { doneAt: iso(2), result: 'Внесено 7 человек, двое могут учить молоку.', found: '' },
+      'd0-3': { doneAt: iso(1), result: '', found: '' },
+    },
+    playbookCustom: [],
   };
 }

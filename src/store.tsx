@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { AppState, Attestation, BaseUnit, DialIn, EspressoTarget, Equipment, InventoryItem, Recipe, Settings, Stocktake, WriteOff } from './types';
 import { defaultModules, makeSeed } from './seed';
+import { PLAYBOOK, type PlaybookItem } from './config';
 
 /**
  * Слой хранения. Сейчас данные лежат в браузере (localStorage).
@@ -502,6 +503,41 @@ export function reorderList(state: AppState, locationIds: string[]): { item: Inv
  * в г, мл и шт (кг → г, л → мл, прочее считаем штуками). Ингредиенты стандартов попадают
  * в банк ингредиентов. Возвращает null, если данные не похожи на Chief Hub.
  */
+/* ---------- Путь шефа ---------- */
+
+export interface PlaybookStep extends Partial<PlaybookItem> {
+  id: string;
+  text: string;
+  /** Свой шаг, добавленный из заметки */
+  custom?: boolean;
+}
+
+/** Этапы плана вместе со своими шагами пользователя. */
+export function playbookStages(state: AppState) {
+  return PLAYBOOK.map((st) => ({
+    ...st,
+    items: [
+      ...st.items,
+      ...state.playbookCustom.filter((c) => c.stageId === st.id).map((c): PlaybookStep => ({ id: c.id, text: c.text, custom: true })),
+    ] as PlaybookStep[],
+  }));
+}
+
+/** Прогресс плана: сколько шагов отмечено из всех. */
+export function playbookProgress(state: AppState): { done: number; total: number } {
+  const ids = playbookStages(state).flatMap((s) => s.items.map((i) => i.id));
+  return { done: ids.filter((id) => state.playbook.includes(id)).length, total: ids.length };
+}
+
+/** Заметки «Что всплыло», которые ещё не разобраны, свежие сверху. */
+export function playbookToReview(state: AppState): { stepId: string; text: string; found: string; date: string }[] {
+  const all = playbookStages(state).flatMap((s) => s.items);
+  return Object.entries(state.playbookNotes)
+    .filter(([, n]) => n.found.trim() && !n.foundDone)
+    .map(([id, n]) => ({ stepId: id, text: all.find((i) => i.id === id)?.text ?? id, found: n.found.trim(), date: n.doneAt ?? '' }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
 export function migrate(raw: unknown): AppState | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Partial<Omit<AppState, 'version' | 'settings'>> & { version?: number; settings?: Partial<Settings> };
@@ -568,6 +604,8 @@ export function migrate(raw: unknown): AppState | null {
     complaints: r.complaints ?? [],
     reportNote: r.reportNote ?? '',
     playbook: r.playbook ?? [],
+    playbookNotes: r.playbookNotes ?? {},
+    playbookCustom: r.playbookCustom ?? [],
   };
 }
 

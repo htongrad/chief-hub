@@ -14,7 +14,8 @@ import Rounds from './modules/Rounds';
 import Report from './modules/Report';
 import SettingsPage from './modules/Settings';
 
-const VIEWS: Record<ModuleId, () => JSX.Element> = {
+/** Разделы получают переход в другой раздел (например, из «Пути шефа»). */
+const VIEWS: Record<ModuleId, (p: { go: (id: ModuleId) => void }) => JSX.Element> = {
   overview: Overview,
   quality: Quality,
   team: Team,
@@ -76,7 +77,7 @@ export default function App() {
             </div>
           )}
         </div>
-        <View />
+        <View go={setActive} />
       </main>
     </div>
   );

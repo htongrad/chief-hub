@@ -178,6 +178,8 @@ export default function SettingsPage() {
       complaints: [],
       reportNote: '',
       playbook: [],
+      playbookNotes: {},
+      playbookCustom: [],
     }));
   };
 
