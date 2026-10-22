@@ -88,7 +88,7 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
     add(['Показатель', 'Значение', 'Норма или пояснение']);
     add(['Стабильность эспрессо, 30 дн.', st.pct === null ? '—' : `${st.pct}%`, `записей: ${st.total}`], st.pct === null ? '' : st.pct >= 80 ? 'ok' : st.pct >= 60 ? 'warn' : 'bad');
     add(['Себестоимость, последняя неделя', ws.count ? `${ws.cogs.toFixed(1)}%` : '—', `цель ${settings.cogsTargetPct}%${week ? `, неделя ${week}` : ''}`], ws.count ? (ws.cogs <= settings.cogsTargetPct ? 'ok' : 'bad') : '');
-    add(['Выручка, последняя неделя', ws.count ? `${fmt(ws.revenue)} ${cur}` : '—', ws.count ? `чеков ${fmt(ws.checks)}, средний чек ${fmt(ws.avgCheck)} ${cur}` : '']);
+    add(['Выручка, последняя неделя', ws.hasRevenue ? `${fmt(ws.revenue)} ${cur}` : '—', ws.hasRevenue ? `чеков ${fmt(ws.checks)}, средний чек ${fmt(ws.avgCheck)} ${cur}` : '']);
     add(['Аттестации действуют', att.pct === null ? '—' : `${att.pct}%`, `всего ${att.total}, просрочено ${att.due}, не пройдено ${att.failed}`], att.pct === null ? '' : att.due + att.failed === 0 ? 'ok' : 'warn');
     add(['Оборудование с просроченным ТО', overdue, ''], overdue ? 'bad' : 'ok');
     add(['Средний балл обходов, 30 дн.', svc === null ? '—' : `${svc}%`, `минимум ${settings.visitMinScore}%`], svc === null ? '' : svc >= settings.visitMinScore ? 'ok' : 'warn');
@@ -216,15 +216,38 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
     widths: [100, 140, 220, 100],
   });
 
-  // Показатели по неделям
+  // Показатели по дням: недели, месяцы и годы в таблице можно получить сводной таблицей
+  {
+    const list = [...state.dayMetrics].sort((a, b) => b.date.localeCompare(a.date) || ln(a.locationId).localeCompare(ln(b.locationId)));
+    sheets.push({
+      name: 'Показатели',
+      header: ['Дата', 'Точка', `Выручка, ${cur}`, `Из них бар, ${cur}`, 'Доля бара, %', 'Чеки', 'Гости', `Средний чек, ${cur}`, `Выручка на гостя, ${cur}`],
+      rows: list.map((m) =>
+        row(
+          m.date,
+          ln(m.locationId),
+          m.revenue,
+          m.barRevenue,
+          m.revenue ? Math.round((m.barRevenue / m.revenue) * 1000) / 10 : 0,
+          m.checks,
+          m.guests,
+          m.checks ? Math.round(m.revenue / m.checks) : 0,
+          m.guests ? Math.round(m.revenue / m.guests) : 0
+        )
+      ),
+      widths: [100, 140, 120, 130, 110, 80, 80, 130, 160],
+    });
+  }
+
+  // Себестоимость по неделям (вносится вручную)
   {
     const list = [...state.metrics].sort((a, b) => b.week.localeCompare(a.week) || ln(a.locationId).localeCompare(ln(b.locationId)));
     sheets.push({
-      name: 'Показатели',
-      header: ['Неделя', 'Точка', `Выручка, ${cur}`, 'Чеки', `Средний чек, ${cur}`, 'Себестоимость, %'],
-      rows: list.map((m) => row(m.week, ln(m.locationId), m.revenue, m.checks, m.checks ? Math.round(m.revenue / m.checks) : 0, m.cogsPct)),
-      marks: list.map((m) => mk('', '', '', '', '', m.cogsPct > settings.cogsTargetPct ? 'bad' : 'ok')),
-      widths: [100, 140, 120, 80, 130, 130],
+      name: 'Себестоимость',
+      header: ['Неделя', 'Точка', 'Себестоимость, %'],
+      rows: list.map((m) => row(m.week, ln(m.locationId), m.cogsPct)),
+      marks: list.map((m) => mk('', '', m.cogsPct > settings.cogsTargetPct ? 'bad' : 'ok')),
+      widths: [100, 140, 130],
     });
   }
 

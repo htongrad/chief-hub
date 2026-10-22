@@ -1,70 +1,234 @@
-import { useState } from 'react';
-import { fmt, inScope, locName, uid, useStore } from '../store';
+import { useEffect, useState } from 'react';
+import {
+  addDays,
+  avgCheckOf,
+  barShareOf,
+  changePct,
+  fmt,
+  inScope,
+  lastMetricDate,
+  locName,
+  perGuestOf,
+  periodCompare,
+  periodKey,
+  periodLabel,
+  periodSeries,
+  periodShort,
+  periodTotals,
+  shiftPeriod,
+  todayISO,
+  uid,
+  useStore,
+  type DayTotals,
+  type PeriodKind,
+} from '../store';
+
+const KINDS: { id: PeriodKind; label: string; chart: number }[] = [
+  { id: 'day', label: 'День', chart: 14 },
+  { id: 'week', label: 'Неделя', chart: 12 },
+  { id: 'month', label: 'Месяц', chart: 12 },
+  { id: 'year', label: 'Год', chart: 5 },
+];
+
+const pct = (v: number | null) => (v === null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`);
+const tone = (v: number | null) => (v === null ? 'muted' : v >= 0 ? 'ok' : 'bad');
+
+/** Число из поля ввода: пусто или неверно = 0. */
+const num = (s: string) => {
+  const n = parseFloat(s.replace(/\s/g, '').replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+};
 
 export default function Metrics() {
   const { state, update } = useStore();
   const { currency: cur } = state.settings;
   const scope = state.settings.activeLocation;
 
-  const rows = state.metrics.filter((m) => inScope(m.locationId, scope));
-  const weeks = [...new Set(rows.map((m) => m.week))].sort();
-  const byWeek = weeks.map((w) => {
-    const r = rows.filter((x) => x.week === w);
-    return { w, revenue: r.reduce((a, x) => a + x.revenue, 0), checks: r.reduce((a, x) => a + x.checks, 0) };
-  });
-  const max = Math.max(1, ...byWeek.map((x) => x.revenue));
+  // ——— Сводка за период ———
+  const [kind, setKind] = useState<PeriodKind>('week');
+  const [shift, setShift] = useState(0); // 0 = последний период с данными, −1 = на шаг раньше
+  const last = lastMetricDate(state, scope);
+  const baseKey = periodKey(last ?? todayISO(), kind);
+  const key = shiftPeriod(baseKey, kind, shift);
+  const cmp = periodCompare(state, scope, kind, key);
+  const { now, prev, yearAgo } = cmp;
+  const chartCount = KINDS.find((k) => k.id === kind)?.chart ?? 12;
+  const series = periodSeries(state, scope, kind, baseKey, chartCount);
+  const max = Math.max(1, ...series.map((x) => x.t.revenue));
 
-  // Сравнение точек за последнюю неделю
-  const last = weeks[weeks.length - 1];
-  const compare = state.locations
-    .filter((l) => inScope(l.id, scope))
-    .map((l) => {
-      const m = rows.find((x) => x.locationId === l.id && x.week === last);
-      return { l, m };
-    });
+  const tiles: { label: string; value: string; now: number; prev: number; yearAgo: number; note?: string }[] = [
+    { label: 'Выручка', value: `${fmt(now.revenue)} ${cur}`, now: now.revenue, prev: prev.revenue, yearAgo: yearAgo.revenue },
+    {
+      label: 'Выручка бара',
+      value: `${fmt(now.barRevenue)} ${cur}`,
+      now: now.barRevenue,
+      prev: prev.barRevenue,
+      yearAgo: yearAgo.barRevenue,
+      note: now.revenue ? `${barShareOf(now).toFixed(1)}% выручки` : undefined,
+    },
+    { label: 'Чеки', value: fmt(now.checks), now: now.checks, prev: prev.checks, yearAgo: yearAgo.checks },
+    { label: 'Гости', value: fmt(now.guests), now: now.guests, prev: prev.guests, yearAgo: yearAgo.guests },
+    { label: 'Средний чек', value: `${fmt(avgCheckOf(now))} ${cur}`, now: avgCheckOf(now), prev: avgCheckOf(prev), yearAgo: avgCheckOf(yearAgo) },
+    { label: 'Выручка на гостя', value: `${fmt(perGuestOf(now))} ${cur}`, now: perGuestOf(now), prev: perGuestOf(prev), yearAgo: perGuestOf(yearAgo) },
+  ];
 
-  const [f, setF] = useState({ locationId: state.locations[0]?.id ?? '', week: '', revenue: 0, checks: 0, cogsPct: 28 });
+  // ——— Сравнение точек за период ———
+  const locs = state.locations.filter((l) => inScope(l.id, scope));
+  const byLoc = locs.map((l) => ({ l, t: periodTotals(state, l.id, kind, key, cmp.daysCompared === null ? undefined : cmp.daysCompared - 1) }));
+
+  // ——— Ввод дня ———
+  const yesterday = addDays(todayISO(), -1);
+  const [f, setF] = useState({ locationId: state.locations[0]?.id ?? '', date: yesterday, revenue: '', barRevenue: '', checks: '', guests: '' });
+  const existing = state.dayMetrics.find((d) => d.locationId === f.locationId && d.date === f.date);
+  // При выборе точки и даты, по которым день уже внесён, подставляем его цифры: так день можно поправить.
+  useEffect(() => {
+    const e = state.dayMetrics.find((d) => d.locationId === f.locationId && d.date === f.date);
+    setF((p) => ({
+      ...p,
+      revenue: e ? String(e.revenue) : '',
+      barRevenue: e ? String(e.barRevenue) : '',
+      checks: e ? String(e.checks) : '',
+      guests: e ? String(e.guests) : '',
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [f.locationId, f.date]);
+
+  const revenue = num(f.revenue);
+  const barRevenue = num(f.barRevenue);
+  const problem = !f.locationId
+    ? 'Сначала добавьте точку в «Настройках».'
+    : !f.date
+      ? 'Укажите дату.'
+      : f.date > todayISO()
+        ? 'Дата в будущем.'
+        : revenue <= 0
+          ? 'Введите выручку за день.'
+          : barRevenue > revenue
+            ? 'Выручка бара не может быть больше общей выручки.'
+            : '';
+  const [saved, setSaved] = useState('');
   const add = () => {
-    if (!f.week.trim() || !f.locationId) return;
+    if (problem) return;
+    const entry = { locationId: f.locationId, date: f.date, revenue, barRevenue, checks: Math.round(num(f.checks)), guests: Math.round(num(f.guests)) };
     update((s) => ({
       ...s,
-      metrics: [...s.metrics.filter((m) => !(m.locationId === f.locationId && m.week === f.week.trim())), { id: uid(), ...f, week: f.week.trim() }],
+      dayMetrics: [...s.dayMetrics.filter((m) => !(m.locationId === entry.locationId && m.date === entry.date)), { id: existing?.id ?? uid(), ...entry }],
+    }));
+    setSaved(`${existing ? 'Обновлено' : 'Сохранено'}: ${locName(state, entry.locationId)}, ${entry.date}`);
+    // после сохранения готовим форму к следующему дню
+    setF((p) => ({ ...p, date: addDays(p.date, 1) > yesterday ? p.date : addDays(p.date, 1) }));
+  };
+
+  // ——— Себестоимость по неделям (до месячного расчёта) ———
+  const [cf, setCf] = useState({ locationId: state.locations[0]?.id ?? '', week: '', cogsPct: 28 });
+  const addCogs = () => {
+    if (!cf.week.trim() || !cf.locationId) return;
+    update((s) => ({
+      ...s,
+      metrics: [
+        ...s.metrics.filter((m) => !(m.locationId === cf.locationId && m.week === cf.week.trim())),
+        { id: uid(), locationId: cf.locationId, week: cf.week.trim(), revenue: 0, checks: 0, cogsPct: cf.cogsPct },
+      ],
     }));
   };
+  const cogsRows = state.metrics.filter((m) => inScope(m.locationId, scope)).sort((a, b) => b.week.localeCompare(a.week));
+  const dayRows = state.dayMetrics
+    .filter((m) => inScope(m.locationId, scope))
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 60);
+
+  const line = (label: string, t: DayTotals, now0: number, before: number) => (
+    <div className="small muted">
+      {label}: <span className={`pill ${tone(changePct(now0, before))}`}>{pct(changePct(now0, before))}</span>
+      {t.days === 0 ? ' нет данных' : ''}
+    </div>
+  );
 
   return (
     <div className="stack">
       <div className="card">
-        <h2>Выручка по неделям</h2>
-        {byWeek.length === 0 ? (
-          <div className="empty">Данных пока нет. Добавьте первую неделю ниже.</div>
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <h2 style={{ margin: 0 }}>Показатели</h2>
+          <div className="row" style={{ gap: 6 }}>
+            {KINDS.map((k) => (
+              <button
+                key={k.id}
+                className={`btn sm ${kind === k.id ? '' : 'ghost'}`}
+                onClick={() => {
+                  setKind(k.id);
+                  setShift(0);
+                }}
+              >
+                {k.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="row" style={{ justifyContent: 'space-between', margin: '12px 0' }}>
+          <button className="btn ghost sm" aria-label="Раньше" onClick={() => setShift(shift - 1)}>‹</button>
+          <b style={{ textAlign: 'center' }}>{periodLabel(key, kind)}</b>
+          <button className="btn ghost sm" aria-label="Позже" disabled={shift >= 0} onClick={() => setShift(shift + 1)}>›</button>
+        </div>
+
+        {now.days === 0 ? (
+          <div className="empty">За этот период данных нет. Внесите день ниже.</div>
         ) : (
-          <div className="bars" role="img" aria-label="Столбчатая диаграмма выручки по неделям">
-            {byWeek.map((x) => (
-              <div className="bar" key={x.w}>
-                <b>{fmt(x.revenue / 1000)}к</b>
-                <i style={{ height: `${(x.revenue / max) * 130}px` }} />
-                <span>{x.w.slice(5)}</span>
+          <>
+            {cmp.partial && (
+              <p className="small muted" style={{ margin: '0 0 8px' }}>
+                Период ещё не закончился: внесено дней {now.days}. Сравнение идёт с тем же числом дней ({cmp.daysCompared}) прошлых периодов.
+              </p>
+            )}
+            <div className="grid kpis">
+              {tiles.map((t) => (
+                <div className="card kpi" key={t.label}>
+                  <div className="label">{t.label}</div>
+                  <div className="value">{t.value}</div>
+                  {t.note && <div className="delta">{t.note}</div>}
+                  {line('к прошлому', prev, t.now, t.prev)}
+                  {line('к году назад', yearAgo, t.now, t.yearAgo)}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Выручка по периодам</h2>
+        {series.every((x) => x.t.days === 0) ? (
+          <div className="empty">Данных пока нет.</div>
+        ) : (
+          <div className="bars" role="img" aria-label="Столбчатая диаграмма выручки по периодам">
+            {series.map((x) => (
+              <div className="bar" key={x.key}>
+                <b>{x.t.days ? (x.t.revenue >= 1000 ? `${fmt(x.t.revenue / 1000)}к` : fmt(x.t.revenue)) : ''}</b>
+                <i style={{ height: `${(x.t.revenue / max) * 130}px`, opacity: x.key === key ? 1 : 0.55 }} />
+                <span>{periodShort(x.key, kind)}</span>
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {last && (
+      {locs.length > 1 && now.days > 0 && (
         <div className="card flat">
-          <div style={{ padding: '14px 16px 0' }}><h2>Сравнение точек · {last}</h2></div>
+          <div style={{ padding: '14px 16px 0' }}><h2>По точкам · {periodLabel(key, kind)}</h2></div>
           <div className="tablewrap">
             <table>
-              <thead><tr><th>Точка</th><th className="num">Выручка</th><th className="num">Чеки</th><th className="num">Средний чек</th><th className="num">Себестоимость</th></tr></thead>
+              <thead>
+                <tr><th>Точка</th><th className="num">Выручка</th><th className="num">Бар</th><th className="num">Чеки</th><th className="num">Гости</th><th className="num">Средний чек</th></tr>
+              </thead>
               <tbody>
-                {compare.map(({ l, m }) => (
+                {byLoc.map(({ l, t }) => (
                   <tr key={l.id}>
                     <td><b>{l.name}</b></td>
-                    <td className="num">{m ? `${fmt(m.revenue)} ${cur}` : '—'}</td>
-                    <td className="num">{m ? fmt(m.checks) : '—'}</td>
-                    <td className="num">{m && m.checks ? `${fmt(m.revenue / m.checks)} ${cur}` : '—'}</td>
-                    <td className="num">{m ? <span className={`pill ${m.cogsPct <= 28 ? 'ok' : m.cogsPct <= 31 ? 'warn' : 'bad'}`}>{m.cogsPct}%</span> : '—'}</td>
+                    <td className="num">{t.days ? `${fmt(t.revenue)} ${cur}` : '—'}</td>
+                    <td className="num">{t.days ? `${fmt(t.barRevenue)} ${cur}` : '—'}</td>
+                    <td className="num">{t.days ? fmt(t.checks) : '—'}</td>
+                    <td className="num">{t.days ? fmt(t.guests) : '—'}</td>
+                    <td className="num">{t.checks ? `${fmt(avgCheckOf(t))} ${cur}` : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -73,37 +237,54 @@ export default function Metrics() {
         </div>
       )}
 
-      <div className="card">
-        <h2>Добавить неделю</h2>
+      <div className="card" id="day-form">
+        <h2>Внести день</h2>
         <div className="form">
           <div className="f">Точка
             <select value={f.locationId} onChange={(e) => setF({ ...f, locationId: e.target.value })}>
               {state.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
           </div>
-          <div className="f">Неделя<input style={{ width: 110 }} placeholder="2026-W43" value={f.week} onChange={(e) => setF({ ...f, week: e.target.value })} /></div>
-          <div className="f">Выручка<input type="number" min={0} value={f.revenue} onChange={(e) => setF({ ...f, revenue: +e.target.value })} style={{ width: 120 }} /></div>
-          <div className="f">Чеки<input type="number" min={0} value={f.checks} onChange={(e) => setF({ ...f, checks: +e.target.value })} /></div>
-          <div className="f">Себест., %<input type="number" min={0} max={100} step="0.1" value={f.cogsPct} onChange={(e) => setF({ ...f, cogsPct: +e.target.value })} /></div>
-          <button className="btn" onClick={add}>Сохранить</button>
+          <div className="f">Дата<input type="date" max={todayISO()} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></div>
+          <div className="f">Выручка, {cur}<input inputMode="decimal" value={f.revenue} onChange={(e) => setF({ ...f, revenue: e.target.value })} style={{ width: 120 }} /></div>
+          <div className="f">Из них бар, {cur}<input inputMode="decimal" value={f.barRevenue} onChange={(e) => setF({ ...f, barRevenue: e.target.value })} style={{ width: 120 }} /></div>
+          <div className="f">Чеки<input inputMode="numeric" value={f.checks} onChange={(e) => setF({ ...f, checks: e.target.value })} style={{ width: 90 }} /></div>
+          <div className="f">Гости<input inputMode="numeric" value={f.guests} onChange={(e) => setF({ ...f, guests: e.target.value })} style={{ width: 90 }} /></div>
+          <button className="btn" onClick={add} disabled={!!problem}>{existing ? 'Обновить' : 'Сохранить'}</button>
         </div>
-        <p className="small muted" style={{ marginTop: 8 }}>Если запись для этой точки и недели уже есть, она будет заменена.</p>
+        <p className="small muted" style={{ marginTop: 8 }}>
+          {existing ? 'За этот день запись уже есть: цифры подставлены, после правки нажмите «Обновить». ' : ''}
+          {problem && (f.revenue || f.barRevenue) ? problem : ''}
+          {saved && !problem ? saved : ''}
+        </p>
       </div>
 
-      {rows.length > 0 && (
+      {dayRows.length > 0 && (
         <details className="card">
-          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Все записи ({rows.length})</summary>
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Внесённые дни (последние {dayRows.length})</summary>
           <div className="tablewrap" style={{ marginTop: 8 }}>
             <table>
               <tbody>
-                {[...rows].sort((a, b) => b.week.localeCompare(a.week)).map((m) => (
+                {dayRows.map((m) => (
                   <tr key={m.id}>
-                    <td>{m.week}</td>
+                    <td>{m.date}</td>
                     <td>{locName(state, m.locationId)}</td>
                     <td className="num">{fmt(m.revenue)} {cur}</td>
-                    <td className="num">{fmt(m.checks)} чеков</td>
-                    <td className="num">{m.cogsPct}%</td>
-                    <td><button className="btn danger sm" onClick={() => update((s) => ({ ...s, metrics: s.metrics.filter((x) => x.id !== m.id) }))}>×</button></td>
+                    <td className="num">бар {fmt(m.barRevenue)}</td>
+                    <td className="num">{fmt(m.checks)} чек.</td>
+                    <td className="num">{fmt(m.guests)} гост.</td>
+                    <td>
+                      <button
+                        className="btn ghost sm"
+                        onClick={() => {
+                          setF({ ...f, locationId: m.locationId, date: m.date });
+                          document.getElementById('day-form')?.scrollIntoView({ behavior: 'smooth' });
+                        }}
+                      >
+                        Править
+                      </button>{' '}
+                      <button className="btn danger sm" onClick={() => update((s) => ({ ...s, dayMetrics: s.dayMetrics.filter((x) => x.id !== m.id) }))}>×</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -111,6 +292,37 @@ export default function Metrics() {
           </div>
         </details>
       )}
+
+      <details className="card">
+        <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Себестоимость по неделям ({cogsRows.length})</summary>
+        <p className="small muted" style={{ marginTop: 8 }}>Пока вносится вручную. Дальше её заменит расчёт по приходам и инвентаризации.</p>
+        <div className="form">
+          <div className="f">Точка
+            <select value={cf.locationId} onChange={(e) => setCf({ ...cf, locationId: e.target.value })}>
+              {state.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+          </div>
+          <div className="f">Неделя<input style={{ width: 110 }} placeholder="2026-W43" value={cf.week} onChange={(e) => setCf({ ...cf, week: e.target.value })} /></div>
+          <div className="f">Себест., %<input type="number" min={0} max={100} step="0.1" value={cf.cogsPct} onChange={(e) => setCf({ ...cf, cogsPct: +e.target.value })} /></div>
+          <button className="btn" onClick={addCogs}>Сохранить</button>
+        </div>
+        {cogsRows.length > 0 && (
+          <div className="tablewrap" style={{ marginTop: 8 }}>
+            <table>
+              <tbody>
+                {cogsRows.map((m) => (
+                  <tr key={m.id}>
+                    <td>{m.week}</td>
+                    <td>{locName(state, m.locationId)}</td>
+                    <td className="num">{m.cogsPct}%</td>
+                    <td><button className="btn danger sm" onClick={() => update((s) => ({ ...s, metrics: s.metrics.filter((x) => x.id !== m.id) }))}>×</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </details>
     </div>
   );
 }

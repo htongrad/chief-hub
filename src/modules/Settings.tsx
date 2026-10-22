@@ -125,6 +125,7 @@ export default function SettingsPage() {
           delete opening[id];
           return { ...it, opening, locationIds: it.locationIds.filter((x) => x !== id) };
         }),
+        dayMetrics: s.dayMetrics.filter((x) => x.locationId !== id),
         metrics: s.metrics.filter((x) => x.locationId !== id),
         equipment: s.equipment.filter((x) => x.locationId !== id),
         repairs: s.repairs.filter((x) => x.locationId !== id),
@@ -169,6 +170,7 @@ export default function SettingsPage() {
       stocktakes: [],
       writeOffs: [],
       daySales: [],
+      dayMetrics: [],
       metrics: [],
       equipment: [],
       repairs: [],
