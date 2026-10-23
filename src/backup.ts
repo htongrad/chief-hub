@@ -574,9 +574,9 @@ export const APPS_SCRIPT = `/**
  * Chief Hub — приёмник резервных копий на Google Диске.
  * Вставьте этот код целиком, сохраните и разверните как веб-приложение
  * (Выполнять от имени: я, Доступ: все). Адрес веб-приложения вставьте в настройки Chief Hub.
- * Скрипт создаёт папку «Chief Hub», таблицу с листами и копии данных по дням.
+ * Скрипт создаёт папку «02.1 CHIEF HUB», таблицу с листами и копии данных по дням.
  */
-const FOLDER_NAME = 'Chief Hub';
+const FOLDER_NAME = '02.1 CHIEF HUB';
 const SHEET_NAME = 'Chief Hub — данные';
 const DAILY_FOLDER = 'Копии по дням';
 const KEEP_COPIES = 30;
