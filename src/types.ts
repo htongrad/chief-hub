@@ -1,5 +1,6 @@
 export type ModuleId =
   | 'overview'
+  | 'calendar'
   | 'quality'
   | 'team'
   | 'inventory'
@@ -234,6 +235,45 @@ export interface Settings {
   visitMinScore: number;
   /** Допустимое расхождение факта и расчётного остатка при инвентаризации, % */
   stocktakeTolPct: number;
+  /** Часов в обычном рабочем дне графика шефа (в предпраздничный день на час меньше) */
+  workdayHours?: number;
+}
+
+/** Задача в «Календаре». Синхронизируется с отдельным календарём «Chief Hub» в Google Календаре. */
+export interface Task {
+  id: string;
+  title: string;
+  /** День, YYYY-MM-DD */
+  date: string;
+  /** Начало, HH:MM. Пусто — задача на весь день */
+  time?: string;
+  /** Окончание, HH:MM. Пусто — час от начала */
+  endTime?: string;
+  note?: string;
+  done: boolean;
+  doneAt?: string;
+  /** Точка; пусто — вся сеть */
+  locationId?: string;
+  /** Код события в Google Календаре после первой синхронизации */
+  calId?: string;
+  /** Содержимое задачи на момент последней синхронизации: по нему видно, что её меняли после */
+  synced?: string;
+  /** Отпечаток, который скрипт вернул при последней синхронизации: по нему скрипт видит, где менялось — в панели или в календаре */
+  base?: string;
+  /** Удалена в панели, но ещё не убрана из Google Календаря */
+  deleted?: boolean;
+}
+
+/** Отступление от графика по производственному календарю в один день. */
+export type ScheduleKind = 'work' | 'off' | 'vacation' | 'sick' | 'timeoff';
+
+export interface ScheduleDay {
+  date: string;
+  kind: ScheduleKind;
+  /** Часов в этот день; пусто — по производственному календарю */
+  hours?: number;
+  locationId?: string;
+  note?: string;
 }
 
 export interface AppState {
@@ -264,6 +304,10 @@ export interface AppState {
   playbookNotes: Record<string, PlaybookNote>;
   /** Свои шаги, добавленные из заметок «Что всплыло» */
   playbookCustom: PlaybookCustomStep[];
+  /** Задачи «Календаря» */
+  tasks: Task[];
+  /** Отступления от графика шефа (дни, где график не совпадает с производственным календарём) */
+  schedule: ScheduleDay[];
 }
 
 export interface PlaybookNote {

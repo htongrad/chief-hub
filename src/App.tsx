@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { MODULES } from './config';
 import { useStore } from './store';
 import { useAutoBackup } from './backup';
+import { useCalendarSync } from './calendarSync';
 import type { ModuleId } from './types';
 import Overview from './modules/Overview';
+import Calendar from './modules/Calendar';
 import Playbook from './modules/Playbook';
 import Team from './modules/Team';
 import Quality from './modules/Quality';
@@ -17,6 +19,7 @@ import SettingsPage from './modules/Settings';
 /** Разделы получают переход в другой раздел (например, из «Пути шефа»). */
 const VIEWS: Record<ModuleId, (p: { go: (id: ModuleId) => void }) => JSX.Element> = {
   overview: Overview,
+  calendar: Calendar,
   quality: Quality,
   team: Team,
   inventory: Inventory,
@@ -32,6 +35,7 @@ export default function App() {
   const { state, update } = useStore();
   const [active, setActive] = useState<ModuleId>('overview');
   useAutoBackup(state);
+  useCalendarSync(state, update);
 
   const enabled = MODULES.filter((m) => m.locked || state.settings.modules[m.id]);
   const current = enabled.find((m) => m.id === active) ?? enabled[0];

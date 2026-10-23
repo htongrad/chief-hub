@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { AppState, Attestation, BaseUnit, DialIn, EspressoTarget, Equipment, InventoryItem, Recipe, Settings, Stocktake, WriteOff } from './types';
+import type { AppState, Attestation, BaseUnit, DialIn, EspressoTarget, Equipment, InventoryItem, Recipe, ScheduleDay, Settings, Stocktake, Task, WriteOff } from './types';
 import { defaultModules, makeSeed } from './seed';
 import { PLAYBOOK, type PlaybookItem } from './config';
 
@@ -584,6 +584,7 @@ export function migrate(raw: unknown): AppState | null {
       attestDays: s.attestDays ?? 180,
       visitMinScore: s.visitMinScore ?? 80,
       stocktakeTolPct: s.stocktakeTolPct ?? 5,
+      workdayHours: s.workdayHours ?? 8,
     },
     locations: r.locations,
     staff: r.staff ?? [],
@@ -606,6 +607,8 @@ export function migrate(raw: unknown): AppState | null {
     playbook: r.playbook ?? [],
     playbookNotes: r.playbookNotes ?? {},
     playbookCustom: r.playbookCustom ?? [],
+    tasks: r.tasks ?? [],
+    schedule: r.schedule ?? [],
   };
 }
 
@@ -781,6 +784,94 @@ export function periodShort(key: string, kind: PeriodKind): string {
   if (kind === 'day') return `${key.slice(8)}.${key.slice(5, 7)}`;
   if (kind === 'week') return `Н${Number(key.slice(6))}`;
   return kind === 'month' ? MONTHS_SHORT[Number(key.slice(5)) - 1] : key;
+}
+
+// ——— Календарь: задачи и график шефа ———
+
+/** Задачи в области просмотра: своей точки и общие (без точки), без удалённых. */
+export function tasksFor(state: AppState, scope: string): Task[] {
+  return state.tasks.filter((t) => !t.deleted && (scope === 'all' || !t.locationId || t.locationId === scope));
+}
+
+/** Порядок: по дню, затем по времени (задачи на весь день раньше), затем по названию. */
+export const sortTasks = (a: Task, b: Task) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? '') || a.title.localeCompare(b.title);
+
+/** Просроченные: день прошёл, задача не выполнена. */
+export function overdueTasks(state: AppState, scope: string, today = todayISO()): Task[] {
+  return tasksFor(state, scope).filter((t) => !t.done && t.date < today).sort(sortTasks);
+}
+
+/** Задачи периода: день, неделя, месяц или год. */
+export function tasksInPeriod(state: AppState, scope: string, kind: PeriodKind, key: string): Task[] {
+  const from = periodStart(key, kind);
+  const to = periodEnd(key, kind);
+  return tasksFor(state, scope).filter((t) => t.date >= from && t.date <= to).sort(sortTasks);
+}
+
+/** Содержимое задачи, которое уходит в Google Календарь. Если оно изменилось после синхронизации, задачу надо отправить заново. */
+export const taskSig = (t: Task) => JSON.stringify([t.title, t.date, t.time ?? '', t.endTime ?? '', t.note ?? '', t.done, !!t.deleted]);
+
+/** Задача менялась после последней синхронизации (или ещё не синхронизирована). */
+export const taskDirty = (t: Task) => !t.calId || t.synced !== taskSig(t);
+
+export type DayKind = 'work' | 'short' | 'off';
+
+/**
+ * Тип дня по производственному календарю РФ. codes — строка по дням года: 0 рабочий, 1 выходной или
+ * праздник, 2 сокращённый (так отдаёт isdayoff.ru). Нет данных на год: выходными считаются суббота и воскресенье.
+ */
+export function dayKindOf(date: string, codes?: string): { kind: DayKind; known: boolean } {
+  if (codes) {
+    const c = codes[daysBetween(`${date.slice(0, 4)}-01-01`, date)];
+    if (c === '1') return { kind: 'off', known: true };
+    if (c === '2') return { kind: 'short', known: true };
+    if (c === '0' || c === '4') return { kind: 'work', known: true };
+  }
+  const wd = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return { kind: wd === 0 || wd === 6 ? 'off' : 'work', known: false };
+}
+
+export interface ScheduleCell {
+  date: string;
+  /** Тип дня по производственному календарю */
+  cal: DayKind;
+  /** Данные календаря загружены (иначе день определён только по субботе и воскресенью) */
+  known: boolean;
+  /** Норма часов по производственному календарю */
+  norm: number;
+  /** Что в графике: работа, выходной, отпуск, больничный или отгул */
+  plan: ScheduleDay['kind'];
+  /** Часов по графику */
+  hours: number;
+  entry?: ScheduleDay;
+}
+
+/** Один день графика: производственный календарь плюс отступление, если оно записано. */
+export function scheduleDay(state: AppState, date: string, codes?: string): ScheduleCell {
+  const full = state.settings.workdayHours ?? 8;
+  const { kind: cal, known } = dayKindOf(date, codes);
+  const norm = cal === 'work' ? full : cal === 'short' ? Math.max(full - 1, 0) : 0;
+  const entry = state.schedule.find((s) => s.date === date);
+  if (!entry) return { date, cal, known, norm, plan: norm > 0 ? 'work' : 'off', hours: norm };
+  if (entry.kind === 'work') return { date, cal, known, norm, plan: 'work', hours: entry.hours ?? (norm > 0 ? norm : full), entry };
+  return { date, cal, known, norm, plan: entry.kind, hours: 0, entry };
+}
+
+/** График месяца (month — YYYY-MM): дни, часы по графику и по норме, число отпускных, больничных и отгулов. */
+export function scheduleMonth(state: AppState, month: string, codes?: string) {
+  const days: ScheduleCell[] = [];
+  const last = periodEnd(month, 'month');
+  for (let d = `${month}-01`; d <= last; d = addDays(d, 1)) days.push(scheduleDay(state, d, codes));
+  return {
+    days,
+    norm: days.reduce((a, d) => a + d.norm, 0),
+    hours: days.reduce((a, d) => a + d.hours, 0),
+    workDays: days.filter((d) => d.plan === 'work' && d.hours > 0).length,
+    vacation: days.filter((d) => d.plan === 'vacation').length,
+    sick: days.filter((d) => d.plan === 'sick').length,
+    timeoff: days.filter((d) => d.plan === 'timeoff').length,
+    known: days.every((d) => d.known),
+  };
 }
 
 export interface DayTotals {
@@ -1026,6 +1117,16 @@ export function buildSignals(state: AppState, scope: string): Signal[] {
   problemItems(state, locs.map((l) => l.id)).forEach((p) =>
     out.push({ level: 'warn', title: `Пересчитать: ${p.item.name} · ${ln(p.locationId)}`, detail: `на ${p.date} факт ${fmtStock(p.item.unit, p.actual)}, по расчёту ${fmtStock(p.item.unit, p.expected)} (расхождение ${Math.round(p.pct)}%)` })
   );
+
+  // Календарь: задачи, срок которых прошёл
+  const late = overdueTasks(state, scope, today);
+  if (late.length) {
+    out.push({
+      level: 'warn',
+      title: `Просроченные задачи: ${late.length}`,
+      detail: late.slice(0, 3).map((t) => `${t.title} (${t.date})`).join('; ') + (late.length > 3 ? ` и ещё ${late.length - 3}` : ''),
+    });
+  }
 
   // Оборудование: ТО просрочено или скоро, открытые заявки
   state.equipment

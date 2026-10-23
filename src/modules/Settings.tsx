@@ -53,10 +53,13 @@ function DriveBackup() {
       <ol className="small" style={{ paddingLeft: 18, margin: '0 0 10px' }}>
         <li>Нажмите «Скопировать код скрипта».</li>
         <li>Откройте script.google.com, войдите в свой Google, нажмите «Новый проект», удалите всё в редакторе и вставьте код.</li>
-        <li>Нажмите «Сохранить», затем «Развернуть» → «Новое развертывание» → тип «Веб-приложение». Выполнять от имени: «Я». Доступ: «Все».</li>
-        <li>Разрешите доступ к своему аккаунту. Если Google предупредит, что приложение не проверено: «Дополнительные настройки» → «Перейти на страницу проекта».</li>
+        <li>Нажмите «Сохранить». Над редактором в списке функций выберите <b>authorize</b> и нажмите «Выполнить». Разрешите доступ к Диску, Календарю и интернету. Если Google предупредит, что приложение не проверено: «Дополнительные настройки» → «Перейти на страницу проекта».</li>
+        <li>Нажмите «Развернуть» → «Новое развертывание» → тип «Веб-приложение». Выполнять от имени: «Я». Доступ: «Все».</li>
         <li>Скопируйте «URL веб-приложения» (заканчивается на /exec), вставьте его ниже и нажмите «Сохранить адрес».</li>
       </ol>
+      <p className="small muted" style={{ marginBottom: 10 }}>
+        Скрипт уже развёрнут, а код обновился (например, появился календарь)? Вставьте новый код на место старого, выполните <b>authorize</b>, затем «Развернуть» → «Управление развертываниями» → карандаш → «Версия: Новая версия» → «Развернуть». Адрес не изменится.
+      </p>
 
       <div className="row" style={{ flexWrap: 'wrap' }}>
         <button className="btn ghost" onClick={copyCode}>Скопировать код скрипта</button>
@@ -157,9 +160,12 @@ export default function SettingsPage() {
   };
 
   const clearAll = () => {
-    if (!confirm('Стереть все демо-данные и начать с чистого листа? Точки останутся.')) return;
+    if (!confirm('Стереть все данные панели и начать с чистого листа? Точки и настройки останутся. Задачи уйдут и из Google Календаря. Копия на Диске тоже обновится пустой, поэтому сначала скачайте данные в файл.')) return;
     update((s) => ({
       ...s,
+      // Задачи, которые уже в Google Календаре, помечаем удалёнными: следующая синхронизация уберёт события
+      tasks: s.tasks.filter((t) => t.calId).map((t) => ({ ...t, deleted: true })),
+      schedule: [],
       staff: [],
       attestations: [],
       dialIns: [],
@@ -258,7 +264,7 @@ export default function SettingsPage() {
           <button className="btn" onClick={exportData}>Скачать данные</button>
           <button className="btn ghost" onClick={() => file.current?.click()}>Загрузить из файла</button>
           <input ref={file} type="file" accept="application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) importData(f); e.target.value = ''; }} />
-          <button className="btn ghost" onClick={clearAll}>Очистить демо-данные</button>
+          <button className="btn ghost" onClick={clearAll}>Очистить все данные</button>
           <button className="btn danger" onClick={() => confirm('Вернуть исходные демо-данные? Ваши изменения пропадут.') && resetDemo()}>Вернуть демо</button>
         </div>
         {msg && <p className="small" style={{ marginTop: 10 }}>{msg}</p>}
