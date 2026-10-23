@@ -7,7 +7,7 @@
  * Поэтому при изменении панели скрипт обновлять не нужно — меняется только этот файл.
  */
 import { useEffect, useRef, useState } from 'react';
-import { AUDIT_ITEM_TEXT, COMPLAINT_ACTIONS, EQUIPMENT_KIND, ROLE_LABEL, SKILLS, SKILL_LEVELS } from './config';
+import { AUDIT_ITEM_TEXT, COMPLAINT_ACTIONS, EQUIPMENT_KIND, ROLE_LABEL, SCHEDULE_KIND, SKILLS, SKILL_LEVELS } from './config';
 import {
   attestStatus,
   attestSummary,
@@ -33,13 +33,16 @@ import {
   portionCost,
   receiptUnitPrice,
   serviceScore,
+  sortTasks,
   stability,
   STOCK_FACTOR,
   STOCK_LABEL,
   stockOf,
   theoryVsActual,
+  todayISO,
   weekSummary,
 } from './store';
+import { CALENDAR_SCRIPT } from './calendarScript';
 import type { AppState } from './types';
 
 export type Mark = '' | 'ok' | 'warn' | 'bad';
@@ -418,6 +421,32 @@ export function buildSheets(state: AppState, now = new Date()): SheetData[] {
     });
   }
 
+  // Календарь: задачи
+  {
+    const today = todayISO();
+    const list = state.tasks.filter((t) => !t.deleted).sort(sortTasks);
+    const status = (t: (typeof list)[number]) => (t.done ? 'выполнена' : t.date < today ? 'просрочена' : 'открыта');
+    sheets.push({
+      name: 'Задачи',
+      header: ['Дата', 'Время', 'Задача', 'Точка', 'Статус', 'Заметка', 'В Google Календаре'],
+      rows: list.map((t) => row(t.date, t.time ? (t.endTime ? `${t.time}–${t.endTime}` : t.time) : 'весь день', t.title, t.locationId ? ln(t.locationId) : 'вся сеть', status(t), t.note ?? '', t.calId ? 'да' : 'нет')),
+      marks: list.map((t) => mk('', '', '', '', t.done ? 'ok' : t.date < today ? 'bad' : '', '', '')),
+      widths: [100, 110, 360, 140, 110, 320, 130],
+    });
+  }
+
+  // График шефа: отступления от производственного календаря
+  {
+    const list = [...state.schedule].sort((a, b) => a.date.localeCompare(b.date));
+    sheets.push({
+      name: 'График',
+      header: ['Дата', 'День', 'Что в графике', 'Часов', 'Точка', 'Заметка'],
+      rows: list.map((d) => row(d.date, ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'][new Date(`${d.date}T00:00:00Z`).getUTCDay()], SCHEDULE_KIND[d.kind], d.hours ?? '', d.locationId ? ln(d.locationId) : '', d.note ?? '')),
+      marks: list.map((d) => mk('', '', d.kind === 'work' ? 'warn' : '', '', '', '')),
+      widths: [100, 60, 160, 80, 140, 320],
+    });
+  }
+
   // Путь шефа: шаги, отметки и заметки
   {
     const rows: Cell[][] = [];
@@ -473,9 +502,15 @@ export interface BackupConfig {
   lastError: string | null;
   sheetUrl: string | null;
   folderUrl: string | null;
+  /** Синхронизировать задачи с Google Календарём (нужен обновлённый скрипт) */
+  calendar: boolean;
+  calOk: string | null; // ISO-время последней удачной синхронизации задач
+  calError: string | null;
+  /** Сколько событий календаря не перенесено (повторяющиеся и многодневные) */
+  calSkipped: number;
 }
 
-const defaultCfg: BackupConfig = { url: '', auto: true, lastOk: null, lastError: null, sheetUrl: null, folderUrl: null };
+const defaultCfg: BackupConfig = { url: '', auto: true, lastOk: null, lastError: null, sheetUrl: null, folderUrl: null, calendar: true, calOk: null, calError: null, calSkipped: 0 };
 
 export function loadBackupConfig(): BackupConfig {
   try {
@@ -574,8 +609,10 @@ export const APPS_SCRIPT = `/**
  * Chief Hub — приёмник резервных копий на Google Диске.
  * Вставьте этот код целиком, сохраните и разверните как веб-приложение
  * (Выполнять от имени: я, Доступ: все). Адрес веб-приложения вставьте в настройки Chief Hub.
- * Скрипт создаёт папку «02.1 CHIEF HUB», таблицу с листами и копии данных по дням.
+ * Скрипт создаёт папку «02.1 CHIEF HUB», таблицу с листами и копии данных по дням,
+ * а также календарь «Chief Hub» для задач и берёт производственный календарь РФ.
  */
+const SCRIPT_VERSION = 2;
 const FOLDER_NAME = '02.1 CHIEF HUB';
 const SHEET_NAME = 'Chief Hub — данные';
 const DAILY_FOLDER = 'Копии по дням';
@@ -583,7 +620,7 @@ const KEEP_COPIES = 30;
 const COLORS = { ok: '#e6f4ea', warn: '#fef7e0', bad: '#fce8e6' };
 
 function doGet() {
-  return out_({ ok: true, app: 'chief-hub-backup' });
+  return out_({ ok: true, app: 'chief-hub-backup', version: SCRIPT_VERSION });
 }
 
 function doPost(e) {
@@ -591,7 +628,10 @@ function doPost(e) {
   lock.waitLock(30000);
   try {
     const p = JSON.parse(e.postData.contents);
-    if (p.app !== 'chief-hub' || !p.state) throw new Error('это не данные Chief Hub');
+    if (p.app !== 'chief-hub') throw new Error('это не данные Chief Hub');
+    if (p.action === 'calendar') return out_(syncCalendar_(p));
+    if (p.action === 'prodcal') return out_(prodCalendar_(p));
+    if (!p.state) throw new Error('это не данные Chief Hub');
     const folder = folder_(DriveApp, FOLDER_NAME);
     const ss = spreadsheet_(folder);
     writeSheets_(ss, p.sheets || []);
@@ -689,4 +729,4 @@ function upsert_(folder, name, text) {
   if (it.hasNext()) it.next().setContent(text);
   else folder.createFile(name, text, 'application/json');
 }
-`;
+` + CALENDAR_SCRIPT;

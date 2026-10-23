@@ -3,6 +3,7 @@ import type { AppState, Attestation, Complaint, DayMetric, DialIn, Equipment, Ba
 /** Все разделы включены. Используется для демо и при переносе данных старой версии. */
 export const defaultModules = (): Record<ModuleId, boolean> => ({
   overview: true,
+  calendar: true,
   quality: true,
   team: true,
   inventory: true,
@@ -225,6 +226,7 @@ export function makeSeed(): AppState {
       attestDays: 180,
       visitMinScore: 80,
       stocktakeTolPct: 5,
+      workdayHours: 8,
     },
     locations,
     staff,
@@ -251,5 +253,8 @@ export function makeSeed(): AppState {
       'd0-3': { doneAt: iso(1), result: '', found: '' },
     },
     playbookCustom: [],
+    // Демо-задач нет намеренно: при включённой синхронизации они попали бы в настоящий Google Календарь
+    tasks: [],
+    schedule: [],
   };
 }

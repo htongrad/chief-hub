@@ -145,6 +145,32 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .empty { padding: 26px; text-align: center; color: var(--ink-2); }
 .section-title { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 6px 2px 0; }
 
+.seg button.on.accent { background: var(--accent); }
+
+/* Календарь: задачи */
+.task { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
+.task input[type='checkbox'] { width: 22px; height: 22px; margin-top: 1px; flex: none; }
+.task .body { flex: 1; min-width: 0; }
+.task .title { word-break: break-word; }
+.task.done .title { color: var(--ink-2); text-decoration: line-through; }
+.alert .task:first-of-type { border-top: 0; }
+.daygroup { font-size: 13px; font-weight: 700; color: var(--ink-2); margin: 14px 0 2px; }
+
+/* Календарь: график шефа */
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.cal-head { text-align: center; font-size: 12px; color: var(--ink-2); padding: 2px 0; }
+.cal-cell { all: unset; box-sizing: border-box; cursor: pointer; min-height: 60px; padding: 5px 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; justify-content: space-between; font-size: 13px; overflow: hidden; }
+.cal-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cal-cell.off { background: var(--surface-2); color: var(--ink-2); }
+.cal-cell.short { background: color-mix(in srgb, var(--warn) 16%, var(--surface)); }
+.cal-cell.leave { background: color-mix(in srgb, var(--accent) 20%, var(--surface)); }
+.cal-cell.extra { background: color-mix(in srgb, var(--ok) 18%, var(--surface)); }
+.cal-cell.today { border: 2px solid var(--accent); padding: 4px 5px; }
+.cal-cell.sel { box-shadow: 0 0 0 2px var(--ink); }
+.cal-num { font-weight: 700; }
+.cal-sub { font-size: 11px; color: var(--ink-2); }
+.cal-mark { font-size: 11px; font-weight: 700; color: var(--accent); }
+
 /* Мобильная версия: нижняя панель вместо боковой */
 @media (max-width: 820px) {
   .app { grid-template-columns: 1fr; padding-bottom: 72px; }
@@ -154,4 +180,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .main { padding: 16px 14px 24px; }
   .kpi .value { font-size: 22px; }
   th, td { padding: 9px 8px; }
+  .cal-grid { gap: 3px; }
+  .cal-cell { min-height: 52px; padding: 4px; font-size: 12px; }
+  .cal-cell.today { padding: 3px; }
+  .cal-sub, .cal-mark { font-size: 10px; }
 }
